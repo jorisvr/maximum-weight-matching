@@ -669,7 +669,7 @@ def _trace_alternating_paths(
         blossom_marker[b] = False
 
     # If we found a common ancestor, trim the paths so they end there.
-    if first_common == -1:
+    if first_common != -1:
         assert vertex_blossom[vedges[-1][0]] == first_common
         while wedges and (vertex_blossom[wedges[-1][0]] != first_common):
             wedges.pop()
