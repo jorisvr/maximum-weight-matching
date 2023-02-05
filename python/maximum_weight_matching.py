@@ -978,9 +978,9 @@ def _substage_scan(
 
         # Take a vertex from the queue.
         v = stage_data.queue.pop()
-        vblossom = matching.vertex_blossom[v]
 
         # Double-check that "v" is an S-vertex.
+        vblossom = matching.vertex_blossom[v]
         assert stage_data.blossom_label[vblossom] == _LABEL_S
 
         # Scan the edges that are incident on "v".
@@ -992,6 +992,9 @@ def _substage_scan(
             # Try to pull this edge into an alternating tree.
 
             # Ignore edges that are internal to a blossom.
+            # Note: blossom index of vertex "v" may change during this loop,
+            # so we need to refresh it here.
+            vblossom = matching.vertex_blossom[v]
             wblossom = matching.vertex_blossom[w]
             if vblossom == wblossom:
                 continue
@@ -1028,14 +1031,16 @@ def _substage_scan(
                     assert best_edge_set is not None
                     best_edge_set.append(e)
 
-            # Update tracking of least-slack edges between vertex "w" and
-            # any S-vertex. We do this even for edges that have zero slack.
-            # (If "w" is part of a T-blossom, it may become unlabeled later.
-            # At that point we will need this edge to relabel vertex "w".
-            # And we will find this edge through least-slack edge tracking.)
-            best_edge = stage_data.vertex_best_edge[w]
-            if best_edge < 0 or slack < matching.edge_slack(best_edge):
-                stage_data.vertex_best_edge[w] = e
+            if wlabel != _LABEL_S:
+                # Update tracking of least-slack edges from vertex "w" to
+                # any S-vertex. We do this only for T-vertices and unlabeled
+                # vertices. Edges which have zero slack are also tracked.
+                # If "w" is part of a T-blossom, it may become unlabeled
+                # later. At that point we will need a zero-slack edge to
+                # relabel vertex "w".
+                best_edge = stage_data.vertex_best_edge[w]
+                if best_edge < 0 or slack < matching.edge_slack(best_edge):
+                    stage_data.vertex_best_edge[w] = e
 
     # No further S vertices to scan, and no augmenting path found.
     return None
@@ -1150,17 +1155,9 @@ def _expand_t_blossom(
         # path_nodes[i] has already been labeled T.
         # We now assign labels to path_nodes[i+1] and path_nodes[i+2].
 
-        # Assign label S to path_nodes[i+1] and attach it to path_nodes[i].
-        sub = path_nodes[i+1]
-        stage_data.blossom_label[sub] = _LABEL_S
-        stage_data.blossom_link[sub] = path_edges[i]
-
-        # Put vertices in the newly labeled S-blossom in the queue.
-# TODO : It feels like we have seen this code pattern a few times; try to generalize it.
-        if sub < num_vertex:
-            stage_data.queue.append(sub)
-        else:
-            stage_data.queue.extend(matching.blossom_vertices(sub))
+        # Assign label S to path_nodes[i+1].
+        (w, v) = path_edges[i]
+        _substage_assign_label_s(matching, stage_data, v)
 
         # Assign label T to path_nodes[i+2] and attach it to path_nodes[i+1].
         sub = path_nodes[i+2]
@@ -1434,15 +1431,14 @@ def _apply_delta_step(
 
     # Apply delta to dual variables of top-level non-trivial blossoms.
     for b in range(num_vertex, 2 * num_vertex):
-        blabel = stage_data.blossom_label[b]
-        if blabel == _LABEL_S:
-            # S-blossom: add 2*delta to dual variable.
-            assert matching.blossom_parent[b] == -1
-            matching.get_blossom(b).half_dual_var += delta
-        elif blabel == _LABEL_T:
-            # T-blossom: subtract 2*delta from dual variable.
-            assert matching.blossom_parent[b] == -1
-            matching.get_blossom(b).half_dual_var -= delta
+        if matching.blossom_parent[b] == -1:
+            blabel = stage_data.blossom_label[b]
+            if blabel == _LABEL_S:
+                # S-blossom: add 2*delta to dual variable.
+                matching.get_blossom(b).half_dual_var += delta
+            elif blabel == _LABEL_T:
+                # T-blossom: subtract 2*delta from dual variable.
+                matching.get_blossom(b).half_dual_var -= delta
 
 
 def _run_stage(matching: _PartialMatching) -> bool:
@@ -1604,7 +1600,7 @@ def _verify_optimum(
 
         # List blossoms that contain the edge (i, j).
         edge_blossoms = []
-        for (bi, bj) in zip(iblossoms, jblossoms):
+        for (bi, bj) in zip(reversed(iblossoms), reversed(jblossoms)):
             if bi != bj:
                 break
             edge_blossoms.append(bi)
