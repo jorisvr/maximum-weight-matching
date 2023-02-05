@@ -57,6 +57,9 @@ def maximum_weight_matching(
     if not edges:
         return []
 
+    print()
+    print("---")
+
     # Initialize graph representation.
     graph = _GraphInfo(edges)
 
@@ -321,9 +324,16 @@ class _GraphInfo:
 #    - Is there a way to reduce allocations of tuples ?
 #      (First profile if it saves any time, otherwise don't even bother.)
 #
-#    - Probably better to use "vb" instead of "vblossom", so we consistently use the "b" suffix to mark blossom _index_.
-#    - Consider using "wt" for weight instead of "w".
+#    - Revert to using variable "w" for edge weight.
+#    - Avoid using "v" and "w" for vertex indices; instead use "i", "j", "k", or maybe "p", "q", "r".
+#    - Consistently use "b", "bi", "bj", "bk" for blossom index.
+#      And use "blossom", "iblossom", "jblossom" for the full blossom object.
+#
 #    - Maybe nice to abstract away the management of least-slack edges to separate classes.
+#
+# NOTE: It is possible for a blossom to have an unmatched base vertex.
+#       Top-level blossoms with unmatched based vertex are marked S-blossom at the start of a stage.
+#       Such blossoms can appear as the endpoints of an augmenting path.
 #
 # Proof that S-to-S edges have even slack when working with integer weights:
 # Edge slack is even iff indicent vertex duals are both odd or both even.
@@ -368,14 +378,13 @@ class _Blossom:
     Blossoms are recursive structures: A non-trivial blossoms contains
     sub-blossoms, which may themselves contain sub-blossoms etc.
 
-    All vertices that are contained in a non-trivial blossom are matched.
-    Exactly one of these vertices is matched to a vertex outside the blossom;
-    this is the "base vertex" of the blossom.
+    Each blossom contains exactly one vertex that is not matched to another
+    vertex in the same blossom. This is the "base vertex" of the blossom.
 
     Blossoms are created and destroyed by the matching algorithm.
     This implies that not every odd-length alternating cycle is a blossom;
     it only becomes a blossom through an explicit action of the algorithm.
-    An existing blossom may also be changed when the matching is augmented
+    An existing blossom may be changed when the matching is augmented
     along a path that runs through the blossom.
     """
 
@@ -413,7 +422,7 @@ class _Blossom:
 
         # "base_vertex" is the vertex index of the base of the blossom.
         # This is the unique vertex which is contained in the blossom
-        # but currently matched to a vertex not contained in the blossom.
+        # but not matched to another vertex in the same blossom.
         self.base_vertex: int = base_vertex
 
         # Every blossom has a variable in the dual LPP.
@@ -711,7 +720,7 @@ def _make_blossom(
     # but it must start and end in the same _blossom_.
     subblossoms_next = [matching.vertex_blossom[w] for (v, w) in path.edges]
     assert subblossoms[0] == subblossoms_next[-1]
-    assert subblossoms[1:] == subblossoms[:-1]
+    assert subblossoms[1:] == subblossoms_next[:-1]
 
     # Determine the base vertex of the new blossom.
     base_blossom = subblossoms[0]
@@ -828,74 +837,86 @@ def _make_blossom(
     stage_data.blossom_best_edge[b] = best_edge
 
 
-def _stage_mark_unmatched_vertices(
+def _substage_assign_label_s(
         matching: _PartialMatching,
-        stage_data: _StageData
+        stage_data: _StageData,
+        v: int,
         ) -> None:
-    """Assign label S to all unmatched vertices and put them in the
-    scan queue.
+    """Assign label S to the unlabeled blossom that contains vertex "v".
 
-    This function takes time O(n).
+    If vertex "v" is matched, it is attached to the alternating tree via its
+    matched edge. If vertex "v" is unmatched, it becomes the root of
+    an alternating tree.
+
+    All vertices in the newly labeled S-blossom are added to the scan queue.
+
+    Precondition:
+     - "v" is an unlabeled vertex, either unmatched
+       or matched to a T-vertex via a tight edge.
     """
-    num_vertex = matching.graph.num_vertex
 
-    for v in range(num_vertex):
-        if matching.vertex_mate[v] < 0:
+    # Assign label S to the blossom that contains vertex "v".
+    vb = matching.vertex_blossom[v]
+    assert stage_data.blossom_label[vb] == _LABEL_NONE
+    stage_data.blossom_label[vb] = _LABEL_S
 
-            # "v" is an unmatched vertex.
-            # Double-check that it is not contained in a non-trivial blossom.
-            assert matching.vertex_blossom[v] == v
+    w = matching.vertex_mate[v]
+    if w == -1:
+        # Vertex "v" is unmatched.
+        # It must be either a top-level vertex or the base vertex of
+        # a top-level blossom.
+        assert (vb == v) or (matching.get_blossom(vb).base_vertex == v)
 
-            # Assign label S and mark as root of an alternating tree.
-            stage_data.blossom_label[v] = _LABEL_S
-            stage_data.blossom_link[v] = None
+        # Mark the blossom that contains "v" as root of an alternating tree.
+        stage_data.blossom_link[vb] = None
 
-            # Add to the scan queue.
-            stage_data.queue.append(v)
+    else:
+        # Vertex "v" is matched to T-vertex "w".
+        wb = matching.vertex_blossom[w]
+        assert stage_data.blossom_label[wb] == _LABEL_T
+
+        # Attach the blossom that contains "v" to the alternating tree.
+        stage_data.blossom_link[vb] = (w, v)
+
+    # Initialize the list of least-slack edges of the newly labeled blossom.
+    # This list will be filled by scanning the vertices of the blossom.
+    stage_data.blossom_best_edge_set[vb] = []
+
+    # Add all vertices inside the newly labeled S-blossom to the queue.
+    if vb == v:
+        stage_data.queue.append(v)
+    else:
+        stage_data.queue.extend(matching.blossom_vertices(vb))
 
 
-def _substage_add_unlabeled(
+def _substage_assign_label_t(
         matching: _PartialMatching,
         stage_data: _StageData,
         v: int,
         w: int
         ) -> None:
-    """Add the unlabeled blossom that contains vertex "w".
+    """Assign label T to the unlabeled blossom that contains vertex "w".
 
-    Assign label T to the blossom that contains "w" and assign label S
-    to its mate. Attach both newly labeled blossoms to the alternating tree.
-
-    Any vertices that become S-vertices through this process are added to
-    the queue.
+    Attach it to the alternating tree via edge (v, w).
+    Then immediately assign label S to the mate of vertex "w".
 
     Preconditions:
-        "v" is an S-vertex.
-        "w" is an unlabeled, matched vertex.
-        There is a tight edge between vertices "v" and "w".
+     - "v" is an S-vertex.
+     - "w" is an unlabeled, matched vertex.
+     - There is a tight edge between vertices "v" and "w".
     """
     assert stage_data.blossom_label[matching.vertex_blossom[v]] == _LABEL_S
 
     # Assign label T to the unlabeled blossom.
-    wblossom = matching.vertex_blossom[w]
-    assert stage_data.blossom_label[wblossom] == _LABEL_NONE
-    stage_data.blossom_label[wblossom] = _LABEL_T
-    stage_data.blossom_link[wblossom] = (v, w)
+    wb = matching.vertex_blossom[w]
+    assert stage_data.blossom_label[wb] == _LABEL_NONE
+    stage_data.blossom_label[wb] = _LABEL_T
+    stage_data.blossom_link[wb] = (v, w)
 
-    # Find the mate "y" of vertex "w".
-    wbase = w if wblossom == w else matching.get_blossom(wblossom).base_vertex
+    # Assign label S to the blossom that contains the mate of vertex "w".
+    wbase = w if wb == w else matching.get_blossom(wb).base_vertex
     y = matching.vertex_mate[wbase]
-
-    # Assign label S to the blossom that contains vertex "y".
-    yblossom = matching.vertex_blossom[y]
-    assert stage_data.blossom_label[yblossom] == _LABEL_NONE
-    stage_data.blossom_label[yblossom] = _LABEL_S
-    stage_data.blossom_link[yblossom] = (w, y)
-
-    # Add all vertices inside the newly labeled S-blossom to the queue.
-    if yblossom == y:
-        stage_data.queue.append(y)
-    else:
-        stage_data.queue.extend(matching.blossom_vertices(yblossom))
+    _substage_assign_label_s(matching, stage_data, y)
 
 
 def _substage_add_s_to_s_edge(
@@ -982,9 +1003,8 @@ def _substage_scan(
             slack = matching.edge_slack(e)
             if slack <= 0:
                 if wlabel == _LABEL_NONE:
-                    # Add the unlabeled blossom containing vertex "w" to the
-                    # alternating tree and label it as T-blossom.
-                    _substage_add_unlabeled(matching, stage_data, v, w)
+                    # Assign label T to the blossom that contains vertex "w".
+                    _substage_assign_label_t(matching, stage_data, v, w)
                 elif wlabel == _LABEL_S:
                     # This edge connects two S-blossoms. Use it to find
                     # either a new blossom or an augmenting path.
@@ -1068,80 +1088,9 @@ def _find_path_through_blossom(
             nodes.append(blossom.subblossoms[i+1])
             edges.append(blossom.edges[i+1])
             nodes.append(blossom.subblossoms[(i+2) % nsub])
+            i = (i + 2) % nsub
 
     return (nodes, edges)
-
-
-def _augment_blossom(matching: _PartialMatching, b: int, v: int) -> None:
-    """Augment along an alternating path through blossom "b", from vertex "v"
-    to the base vertex of the blossom.
-
-    This function takes time O(n).
-    """
-
-    num_vertex = matching.graph.num_vertex
-
-    # Use an explicit stack to avoid deep recursion.
-    stack = [(b, v)]
-
-    while stack:
-        (top_blossom, sub) = stack.pop()
-        b = matching.blossom_parent[sub]
-
-        if b != top_blossom:
-            # Set up to continue augmenting through the parent of "b".
-            stack.append((top_blossom, b))
-
-        # Augment blossom "b" from subblossom "sub" to the base of the
-        # blossom. Afterwards, "sub" contains the new base vertex.
-
-        blossom = matching.blossom[b]
-        assert blossom is not None
-
-        # Walk through the expanded blossom from "sub" to the base vertex.
-        (path_nodes, path_edges) = _find_path_through_blossom(
-            matching, b, sub)
-
-        for i in range(0, len(path_edges), 2):
-            # Before augmentation:
-            #   path_nodes[i] is matched to path_nodes[i+1]
-            #
-            #   (i) ===== (i+1) ---(v,w)--- (i+2)
-            #
-            # After augmentation:
-            #   path_nodes[i+1] is mathed to path_nodes[i+2] via edge (v, w)
-            #
-            #   (i) ----- (i+1) ===(v,w)=== (i+2)
-            #
-
-            # Pull the edge (v, w) into the matching.
-            (v, w) = path_edges[i+1]
-            matching.vertex_mate[v] = w
-            matching.vertex_mate[w] = v
-
-            # Augment through the subblossoms touching the edge (v, w).
-            # Nothing needs to be done for trivial subblossoms.
-            vb = path_nodes[i+1]
-            if vb >= num_vertex:
-                stack.append((vb, v))
-
-            wb = path_nodes[i+2]
-            if wb >= num_vertex:
-                stack.append((wb, w))
-
-        # Rotate the subblossom list so the new base ends up in position 0.
-        sub_pos = blossom.subblossoms.index(sub)
-        blossom.subblossoms = (blossom.subblossoms[sub_pos:]
-                               + blossom.subblossoms[:sub_pos])
-        blossom.edges = blossom.edges[sub_pos:] + blossom.edges[:sub_pos]
-
-        # Update the base vertex.
-        # We can pull this from the sub-blossom where we started since
-        # its augmentation has already finished.
-        if sub < num_vertex:
-            blossom.base_vertex = sub
-        else:
-            blossom.base_vertex = matching.get_blossom(sub).base_vertex
 
 
 def _expand_t_blossom(
@@ -1280,6 +1229,77 @@ def _expand_zero_dual_blossoms(matching: _PartialMatching) -> None:
         matching.unused_blossoms.append(b)
 
 
+def _augment_blossom(matching: _PartialMatching, b: int, v: int) -> None:
+    """Augment along an alternating path through blossom "b", from vertex "v"
+    to the base vertex of the blossom.
+
+    This function takes time O(n).
+    """
+    num_vertex = matching.graph.num_vertex
+
+    # Use an explicit stack to avoid deep recursion.
+    stack = [(b, v)]
+
+    while stack:
+        (top_blossom, sub) = stack.pop()
+        b = matching.blossom_parent[sub]
+
+        if b != top_blossom:
+            # Set up to continue augmenting through the parent of "b".
+            stack.append((top_blossom, b))
+
+        # Augment blossom "b" from subblossom "sub" to the base of the
+        # blossom. Afterwards, "sub" contains the new base vertex.
+
+        blossom = matching.blossom[b]
+        assert blossom is not None
+
+        # Walk through the expanded blossom from "sub" to the base vertex.
+        (path_nodes, path_edges) = _find_path_through_blossom(
+            matching, b, sub)
+
+        for i in range(0, len(path_edges), 2):
+            # Before augmentation:
+            #   path_nodes[i] is matched to path_nodes[i+1]
+            #
+            #   (i) ===== (i+1) ---(v,w)--- (i+2)
+            #
+            # After augmentation:
+            #   path_nodes[i+1] is mathed to path_nodes[i+2] via edge (v, w)
+            #
+            #   (i) ----- (i+1) ===(v,w)=== (i+2)
+            #
+
+            # Pull the edge (v, w) into the matching.
+            (v, w) = path_edges[i+1]
+            matching.vertex_mate[v] = w
+            matching.vertex_mate[w] = v
+
+            # Augment through the subblossoms touching the edge (v, w).
+            # Nothing needs to be done for trivial subblossoms.
+            vb = path_nodes[i+1]
+            if vb >= num_vertex:
+                stack.append((vb, v))
+
+            wb = path_nodes[i+2]
+            if wb >= num_vertex:
+                stack.append((wb, w))
+
+        # Rotate the subblossom list so the new base ends up in position 0.
+        sub_pos = blossom.subblossoms.index(sub)
+        blossom.subblossoms = (blossom.subblossoms[sub_pos:]
+                               + blossom.subblossoms[:sub_pos])
+        blossom.edges = blossom.edges[sub_pos:] + blossom.edges[:sub_pos]
+
+        # Update the base vertex.
+        # We can pull this from the sub-blossom where we started since
+        # its augmentation has already finished.
+        if sub < num_vertex:
+            blossom.base_vertex = sub
+        else:
+            blossom.base_vertex = matching.get_blossom(sub).base_vertex
+
+
 def _augment_matching(
         matching: _PartialMatching,
         path: _AlternatingPath
@@ -1289,10 +1309,14 @@ def _augment_matching(
     This function takes time O(n).
     """
 
-    # Check that the augmenting path starts and ends in an unmatched vertex.
+    # Check that the augmenting path starts and ends in an unmatched vertex
+    # or a blossom with unmatched base.
     assert len(path.edges) % 2 == 1
-    assert matching.vertex_mate[path.edges[0][0]] == -1
-    assert matching.vertex_mate[path.edges[-1][1]] == -1
+    for v in (path.edges[0][0], path.edges[-1][1]):
+        b = matching.vertex_blossom[v]
+        if b != v:
+            v = matching.get_blossom(b).base_vertex
+        assert matching.vertex_mate[v] == -1
 
     # Consider the edges of the augmenting path that are currently not
     # part of the matching but will become part of it.
@@ -1436,11 +1460,15 @@ def _run_stage(matching: _PartialMatching) -> bool:
         False if no further improvement is possible.
     """
 
+    num_vertex = matching.graph.num_vertex
+
     # Initialize stage data structures.
     stage_data = _StageData(matching.graph)
 
     # Assign label S to all unmatched vertices and put them in the queue.
-    _stage_mark_unmatched_vertices(matching, stage_data)
+    for v in range(num_vertex):
+        if matching.vertex_mate[v] == -1:
+            _substage_assign_label_s(matching, stage_data, v)
 
     # Stop if all vertices are matched.
     # No further improvement is possible in this case.
@@ -1477,7 +1505,7 @@ def _run_stage(matching: _PartialMatching) -> bool:
             if (stage_data.blossom_label[matching.vertex_blossom[v]] !=
                     _LABEL_S):
                 (v, w) = (w, v)
-            _substage_add_unlabeled(matching, stage_data, v, w)
+            _substage_assign_label_t(matching, stage_data, v, w)
 
         elif delta_type == 3:
             # Use the S-to-S edge that got unlocked through the delta update.
@@ -1563,16 +1591,16 @@ def _verify_optimum(
         # List blossoms that contain vertex "i".
         iblossoms = []
         bi = blossom_parent[i]
-        while b != -1:
-            iblossoms.append(b)
-            b = blossom_parent[b]
+        while bi != -1:
+            iblossoms.append(bi)
+            bi = blossom_parent[bi]
 
         # List blossoms that contain vertex "j".
         jblossoms = []
         bj = blossom_parent[j]
-        while b != -1:
-            jblossoms.append(b)
-            b = blossom_parent[b]
+        while bj != -1:
+            jblossoms.append(bj)
+            bj = blossom_parent[bj]
 
         # List blossoms that contain the edge (i, j).
         edge_blossoms = []
