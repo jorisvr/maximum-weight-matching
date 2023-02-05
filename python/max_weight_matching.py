@@ -57,9 +57,6 @@ def maximum_weight_matching(
     if not edges:
         return []
 
-    print()
-    print("---")
-
     # Initialize graph representation.
     graph = _GraphInfo(edges)
 
