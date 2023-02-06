@@ -61,8 +61,8 @@ def maximum_weight_matching(
     # Initialize graph representation.
     graph = _GraphInfo(edges)
 
-    # Initialize trivial partial matching without any matched edges.
-    matching = _PartialMatching(graph)
+    # Initialize the matching algorithm.
+    ctx = _MatchingContext(graph)
 
     # Improve the solution until no further improvement is possible.
     #
@@ -71,19 +71,21 @@ def maximum_weight_matching(
     #
     # This loop runs through at most (n/2 + 1) iterations.
     # Each iteration takes time O(n**2).
-    while _run_stage(matching):
+    while ctx.run_stage():
         pass
 
     # Extract the final solution.
     pairs: list[tuple[int, int]] = [
-        (i, j) for (i, j, _w) in edges if matching.vertex_mate[i] == j]
+        (i, j) for (i, j, _w) in edges if ctx.vertex_mate[i] == j]
 
     # Verify that the matching is optimal.
     # This only works reliably for integer weights.
     # Verification is a redundant step; if the matching algorithm is correct,
     # verification will always pass.
     if graph.integer_weights:
-        _verify_optimum(matching)
+        # TODO : pass selection of data to verification
+        #        passing the whole context does not inspire trust that this is an independent verification
+        _verify_optimum(ctx)
 
     return pairs
 
@@ -313,6 +315,12 @@ class _GraphInfo:
                                          for (_i, _j, w) in edges)
 
 
+# Each vertex may be labeled "S" (outer) or "T" (inner) or be unlabeled.
+_LABEL_NONE = 0
+_LABEL_S = 1
+_LABEL_T = 2
+
+
 class _Blossom:
     """Represents a non-trivial blossom in a (partially) matched graph.
 
@@ -382,16 +390,27 @@ class _Blossom:
         self.dual_var: int|float = 0
 
 
-class _PartialMatching:
-    """Represents a partial solution of the matching problem.
+class _AlternatingPath(NamedTuple):
+    """Represents an alternating path or an alternating cycle."""
+    edges: list[tuple[int, int]]
+
+
+class _MatchingContext:
+    """Holds all data used by the matching algorithm.
+
+    It contains a partial solution of the matching problem,
+    as well as several auxiliary data structures.
 
     These data change while the algorithm runs.
     """
 
     def __init__(self, graph: _GraphInfo) -> None:
-        """Initialize a partial solution where all vertices are unmated."""
+        """Set up the initial state of the matching algorithm."""
 
-        # Keep a reference to the graph for convenience.
+        num_vertex = graph.num_vertex
+
+        # Reference to the input graph.
+        # The graph does not change while the algorithm runs.
         self.graph = graph
 
         # Each vertex is either single (unmatched) or matched to
@@ -402,7 +421,7 @@ class _PartialMatching:
         # If vertex "i" is unmatched, "vertex_mate[i] == -1".
         #
         # Initially all vertices are unmatched.
-        self.vertex_mate: list[int] = graph.num_vertex * [-1]
+        self.vertex_mate: list[int] = num_vertex * [-1]
 
         # Blossoms are indexed by integers in range 0 .. 2*n-1.
         #
@@ -419,13 +438,11 @@ class _PartialMatching:
         # Blossoms are created and destroyed while the algorithm runs.
         # Initially there are no blossoms.
         self.blossom: list[Optional[_Blossom]] = [
-            None for b in range(2 * graph.num_vertex)]
+            None for b in range(2 * num_vertex)]
 
         # List of currently unused blossom indices.
         self.unused_blossoms: list[int] = list(
-            reversed(range(graph.num_vertex, 2 * graph.num_vertex)))
-
-        # TODO : we may need a list of top-level blossom indices
+            reversed(range(num_vertex, 2 * num_vertex)))
 
         # Every vertex is part of exactly one top-level blossom,
         # possibly a trivial blossom consisting of just that vertex.
@@ -435,14 +452,14 @@ class _PartialMatching:
         # "vertex_blossom[i] == i" if the "i" is a trivial top-level blossom.
         #
         # Initially all vertices are top-level trivial blossoms.
-        self.vertex_blossom: list[int] = list(range(graph.num_vertex))
+        self.vertex_blossom: list[int] = list(range(num_vertex))
 
         # "blossom_parent[b]" is the index of the smallest blossom that
         # is a strict superset of blossom "b", or
         # "blossom_parent[b] == -1" if blossom "b" is a top-level blossom.
         #
         # Initially all vertices are trivial top-level blossoms.
-        self.blossom_parent: list[int] = (2 * graph.num_vertex) * [-1]
+        self.blossom_parent: list[int] = (2 * num_vertex) * [-1]
 
         # Every vertex has a variable in the dual LPP.
         #
@@ -452,59 +469,8 @@ class _PartialMatching:
         #
         # Vertex duals are initialized to half the maximum edge weight.
         max_weight = max(w for (_i, _j, w) in graph.edges)
-        self.dual_var_2x: list[int|float] = graph.num_vertex * [max_weight]
-
-    def edge_slack_2x(self, e: int) -> int|float:
-        """Return 2 times the slack of the edge with index "e".
-
-        The result is only valid for edges that are not between vertices
-        that belong to the same top-level blossom.
-
-        Multiplication by 2 ensures that the return value is an integer
-        if all edge weights are integers.
-        """
-        (i, j, w) = self.graph.edges[e]
-        assert self.vertex_blossom[i] != self.vertex_blossom[j]
-        return self.dual_var_2x[i] + self.dual_var_2x[j] - 2 * w
-
-    def get_blossom(self, b: int) -> _Blossom:
-        """Return the Blossom instance for blossom index "b"."""
-        blossom = self.blossom[b]
-        assert blossom is not None
-        return blossom
-
-    def blossom_vertices(self, b: int) -> list[int]:
-        """Return a list of vertex indices contained in blossom "b"."""
-        num_vertex = self.graph.num_vertex
-        if b < num_vertex:
-            return [b]
-        else:
-            # Use an explicit stack to avoid deep recursion.
-            stack: list[int] = [b]
-            nodes: list[int] = []
-            while stack:
-                b = stack.pop()
-                for sub in self.get_blossom(b).subblossoms:
-                    if sub < num_vertex:
-                        nodes.append(sub)
-                    else:
-                        stack.append(sub)
-        return nodes
-
-
-# Each vertex may be labeled "S" (outer) or "T" (inner) or be unlabeled.
-_LABEL_NONE = 0
-_LABEL_S = 1
-_LABEL_T = 2
-
-
-class _StageData:
-    """Data structures that are used during a stage of the algorithm."""
-
-    def __init__(self, graph: _GraphInfo) -> None:
-        """Initialize data structures for a new stage."""
-
-        num_vertex = graph.num_vertex
+# TODO : rename to "vertex_dual_2x"
+        self.dual_var_2x: list[int|float] = num_vertex * [max_weight]
 
         # Top-level blossoms that are part of an alternating tree are
         # labeled S or T. Unlabeled top-level blossoms are not (yet)
@@ -549,954 +515,973 @@ class _StageData:
         # Temporary array used to construct new blossoms.
         self.blossom_marker: list[bool] = (2 * num_vertex) * [False]
 
-
-class _AlternatingPath(NamedTuple):
-    """Represents an alternating path or an alternating cycle."""
-    edges: list[tuple[int, int]]
-
-
-def _trace_alternating_paths(
-        matching: _PartialMatching,
-        stage_data: _StageData,
-        i: int,
-        j: int
-        ) -> _AlternatingPath:
-    """Trace back through the alternating trees from vertices "i" and "j".
-
-    If both vertices are part of the same alternating tree, this function
-    discovers a new blossom. In this case it returns an alternating path
-    through the blossom that starts and ends in the same sub-blossom.
-
-    If the vertices are part of different alternating trees, this function
-    discovers an augmenting path. In this case it returns an alternating
-    path that starts and ends in an unmatched vertex.
-
-    This function takes time O(k) to discover a blossom, where "k" is
-    the number of sub-blossoms, or time O(n) to discover an augmenting path.
-
-    Returns:
-        Alternating path as an ordered list of edges between top-level
-        blossoms.
-    """
-
-    vertex_blossom = matching.vertex_blossom
-    blossom_link = stage_data.blossom_link
-    blossom_marker = stage_data.blossom_marker
-    marked_blossoms: list[int] = []
-
-    # "iedges" is a list of edges used while tracing from "i".
-    # "jedges" is a list of edges used while tracing from "j".
-    iedges: list[tuple[int, int]] = []
-    jedges: list[tuple[int, int]] = []
-
-    # Pre-load the edge between "i" and "j" so it will end up in the right
-    # place in the final path.
-    iedges.append((i, j))
-
-    # Alternate between tracing the path from "i" and the path from "j".
-    # This ensures that the search time is bounded by the size of the
-    # newly found blossom.
-    first_common = -1
-    while i != -1 or j != -1:
-
-        # Check if we found a common ancestor.
-        bi = vertex_blossom[i]
-        if blossom_marker[bi]:
-            first_common = bi
-            break
-
-        # Mark blossom as a potential common ancestor.
-        blossom_marker[bi] = True
-        marked_blossoms.append(bi)
-
-        # Track back through the link in the alternating tree.
-        link = blossom_link[bi]
-        if link is None:
-            # Reached the root of this alternating tree.
-            i = -1
-        else:
-            iedges.append(link)
-            i = link[0]
-
-        # Swap "i" and "j" to alternate between paths.
-        if j != -1:
-            i, j = j, i
-            iedges, jedges = jedges, iedges
-
-    # Remove all markers we placed.
-    for b in marked_blossoms:
-        blossom_marker[b] = False
-
-    # If we found a common ancestor, trim the paths so they end there.
-    if first_common != -1:
-        assert vertex_blossom[iedges[-1][0]] == first_common
-        while jedges and (vertex_blossom[jedges[-1][0]] != first_common):
-            jedges.pop()
-
-    # Fuse the two paths.
-    # Flip the order of one path and the edge tuples in the other path
-    # to obtain a single continuous path with correctly ordered edge tuples.
-    path_edges = iedges[::-1] + [(j, i) for (i, j) in jedges]
-
-    # Any S-to-S alternating path must have odd length.
-    assert len(path_edges) % 2 == 1
-
-    return _AlternatingPath(path_edges)
-
-
-def _make_blossom(
-        matching: _PartialMatching,
-        stage_data: _StageData,
-        path: _AlternatingPath
-        ) -> None:
-    """Create a new blossom from an alternating cycle.
-
-    Assign label S to the new blossom.
-    Relabel all T-sub-blossoms as S and add their vertices to the queue.
-
-    This function takes time O(n).
-    """
-
-    num_vertex = matching.graph.num_vertex
-
-    # Check that the path is odd-length.
-    assert len(path.edges) % 2 == 1
-    assert len(path.edges) >= 3
-
-    # Construct the list of sub-blossoms (current top-level blossoms).
-    subblossoms = [matching.vertex_blossom[i] for (i, j) in path.edges]
-
-    # Check that the path is cyclic.
-    # Note the path may not start and end with the same _vertex_,
-    # but it must start and end in the same _blossom_.
-    subblossoms_next = [matching.vertex_blossom[j] for (i, j) in path.edges]
-    assert subblossoms[0] == subblossoms_next[-1]
-    assert subblossoms[1:] == subblossoms_next[:-1]
-
-    # Determine the base vertex of the new blossom.
-    base_blossom = subblossoms[0]
-    if base_blossom >= num_vertex:
-        base_vertex = matching.get_blossom(base_blossom).base_vertex
-    else:
-        base_vertex = base_blossom
-
-    # Create the new blossom object.
-    blossom = _Blossom(subblossoms, path.edges, base_vertex)
-
-    # Allocate a new blossom index and create the blossom object.
-    b = matching.unused_blossoms.pop()
-    matching.blossom[b] = blossom
-    matching.blossom_parent[b] = -1
-
-    # Link the subblossoms to the their new parent.
-    for sub in subblossoms:
-        matching.blossom_parent[sub] = b
-
-    # Update blossom-membership of all vertices in the new blossom.
-    # NOTE: This step takes O(n) time per blossom formation, and adds up
-    #       to O(n**2) total time per stage.
-    #       This could be improved through a union-find datastructure, or
-    #       by somehow re-using the blossom index of the largest sub-blossom.
-    for i in matching.blossom_vertices(b):
-        matching.vertex_blossom[i] = b
-
-    # Assign label S to the new blossom.
-    assert stage_data.blossom_label[base_blossom] == _LABEL_S
-    stage_data.blossom_label[b] = _LABEL_S
-    stage_data.blossom_link[b] = stage_data.blossom_link[base_blossom]
-
-    # Former T-vertices which are part of this blossom have now become
-    # S-vertices. Add them to the queue.
-    for sub in subblossoms:
-        if stage_data.blossom_label[sub] == _LABEL_T:
-            if sub < num_vertex:
-                stage_data.queue.append(sub)
-            else:
-                stage_data.queue.extend(matching.blossom_vertices(sub))
-
-    # Calculate the set of least-slack edges to other S-blossoms.
-    # We basically merge the edge lists from all sub-blossoms, but reject
-    # edges that are internal to this blossom, and trim the set such that
-    # there is at most one edge to each external S-blossom.
-    #
-    # Sub-blossoms that were formerly labeled T can be ignored, since their
-    # vertices are in the queue and will discover neighbouring S-blossoms
-    # via the edge scan process.
-    #
-    # Build a temporary array holding the least-slack edge index to
-    # each top-level S-blossom.
-    #
-    # NOTE: This step takes O(n) time per blossom formation, and adds up
-    #       to O(n**2) total time per stage.
-    #       For sparse graphs, this could be improved by tracking
-    #       least-slack edges in a priority queue.
-    best_edge_to_blossom: list[int] = (2 * num_vertex) * [-1]
-    zero_slack: int|float = 0
-    best_slack_to_blossom: list[int|float] = (2 * num_vertex) * [zero_slack]
-
-    # Add the least-slack edges of every S-sub-blossom.
-    for sub in subblossoms:
-        if stage_data.blossom_label[sub] != _LABEL_S:
-            continue
-        if sub < num_vertex:
-            # Trivial blossoms don't have a list of least-slack edges,
-            # so we just look at all adjacent edges. This happens at most
-            # once per vertex per stage. It adds up to O(m) time per stage.
-            sub_edge_set = matching.graph.adjacent_edges[sub]
-        else:
-            # Use the edge list of the sub-blossom, then delete it from
-            # the sub-blossom.
-            sub_edge_set_opt = stage_data.blossom_best_edge_set[sub]
-            assert sub_edge_set_opt is not None
-            sub_edge_set = sub_edge_set_opt
-            stage_data.blossom_best_edge_set[sub] = None
-
-        # Add edges to the temporary array.
-        for e in sub_edge_set:
-            (i, j, _w) = matching.graph.edges[e]
-            bi = matching.vertex_blossom[i]
-            bj = matching.vertex_blossom[j]
-            assert (bi == b) or (bj == b)
-
-            # Reject internal edges in this blossom.
-            if bi == bj:
-                continue
-
-            # Set bi = other blossom which is reachable through this edge.
-            bi = bj if (bi == b) else bi
-
-            # Reject edges that don't link to an S-blossom.
-            if stage_data.blossom_label[bi] != _LABEL_S:
-                continue
-
-            # Keep only the least-slack edge to "vblossom".
-            slack = matching.edge_slack_2x(e)
-            if ((best_edge_to_blossom[bi] == -1)
-                    or (slack < best_slack_to_blossom[bi])):
-                best_edge_to_blossom[bi] = e
-                best_slack_to_blossom[bi] = slack
-
-    # Extract a compact list of least-slack edge indices.
-    # We can not keep the temporary array because that would blow up
-    # memory use to O(n**2).
-    best_edge_set = [e for e in best_edge_to_blossom if e != -1]
-    stage_data.blossom_best_edge_set[b] = best_edge_set
-
-    # Select the overall least-slack edge to any other S-blossom.
-    best_edge = -1
-    best_slack: int|float = 0
-    for e in best_edge_set:
-        slack = matching.edge_slack_2x(e)
-        if (best_edge == -1) or (slack < best_slack):
-            best_edge = e
-            best_slack = slack
-    stage_data.blossom_best_edge[b] = best_edge
-
-
-def _substage_assign_label_s(
-        matching: _PartialMatching,
-        stage_data: _StageData,
-        i: int,
-        ) -> None:
-    """Assign label S to the unlabeled blossom that contains vertex "i".
-
-    If vertex "i" is matched, it is attached to the alternating tree via its
-    matched edge. If vertex "i" is unmatched, it becomes the root of
-    an alternating tree.
-
-    All vertices in the newly labeled S-blossom are added to the scan queue.
-
-    Precondition:
-        "i" is an unlabeled vertex, either unmatched or matched to
-        a T-vertex via a tight edge.
-    """
-
-    # Assign label S to the blossom that contains vertex "v".
-    bi = matching.vertex_blossom[i]
-    assert stage_data.blossom_label[bi] == _LABEL_NONE
-    stage_data.blossom_label[bi] = _LABEL_S
-
-    j = matching.vertex_mate[i]
-    if j == -1:
-        # Vertex "i" is unmatched.
-        # It must be either a top-level vertex or the base vertex of
-        # a top-level blossom.
-        assert (bi == i) or (matching.get_blossom(bi).base_vertex == i)
-
-        # Mark the blossom that contains "v" as root of an alternating tree.
-        stage_data.blossom_link[bi] = None
-
-    else:
-        # Vertex "i" is matched to T-vertex "j".
-        bj = matching.vertex_blossom[j]
-        assert stage_data.blossom_label[bj] == _LABEL_T
-
-        # Attach the blossom that contains "i" to the alternating tree.
-        stage_data.blossom_link[bi] = (j, i)
-
-    # Initialize the list of least-slack edges of the newly labeled blossom.
-    # This list will be filled by scanning the vertices of the blossom.
-    stage_data.blossom_best_edge_set[bi] = []
-
-    # Add all vertices inside the newly labeled S-blossom to the queue.
-    if bi == i:
-        stage_data.queue.append(i)
-    else:
-        stage_data.queue.extend(matching.blossom_vertices(bi))
-
-
-def _substage_assign_label_t(
-        matching: _PartialMatching,
-        stage_data: _StageData,
-        i: int,
-        j: int
-        ) -> None:
-    """Assign label T to the unlabeled blossom that contains vertex "j".
-
-    Attach it to the alternating tree via edge (i, j).
-    Then immediately assign label S to the mate of vertex "j".
-
-    Preconditions:
-     - "i" is an S-vertex.
-     - "j" is an unlabeled, matched vertex.
-     - There is a tight edge between vertices "i" and "j".
-    """
-    assert stage_data.blossom_label[matching.vertex_blossom[i]] == _LABEL_S
-
-    # Assign label T to the unlabeled blossom.
-    bj = matching.vertex_blossom[j]
-    assert stage_data.blossom_label[bj] == _LABEL_NONE
-    stage_data.blossom_label[bj] = _LABEL_T
-    stage_data.blossom_link[bj] = (i, j)
-
-    # Assign label S to the blossom that contains the mate of vertex "j".
-    jbase = j if bj == j else matching.get_blossom(bj).base_vertex
-    k = matching.vertex_mate[jbase]
-    assert k != -1
-    _substage_assign_label_s(matching, stage_data, k)
-
-
-def _substage_add_s_to_s_edge(
-        matching: _PartialMatching,
-        stage_data: _StageData,
-        i: int,
-        j: int
-        ) -> Optional[_AlternatingPath]:
-    """Add the edge between S-vertices "i" and "j".
-
-    If the edge connects blossoms that are part of the same alternating tree,
-    this function creates a new S-blossom and returns None.
-
-    If the edge connects two different alternating trees, an augmenting
-    path has been discovered. In this case the function changes nothing
-    and returns the augmenting path.
-
-    Returns:
-        Augmenting path if found; otherwise None.
-    """
-
-    # Trace back through the alternating trees from "i" and "j".
-    path = _trace_alternating_paths(matching, stage_data, i, j)
-
-    # If the path is a cycle, create a new blossom.
-    # Otherwise the path is an augmenting path.
-    # Note that an alternating starts and ends in the same blossom,
-    # but not necessarily in the same vertex within that blossom.
-    p = path.edges[0][0]
-    q = path.edges[-1][1]
-    if matching.vertex_blossom[p] == matching.vertex_blossom[q]:
-        _make_blossom(matching, stage_data, path)
-        return None
-    else:
-        return path
-
-
-def _substage_scan(
-        matching: _PartialMatching,
-        stage_data: _StageData
-        ) -> Optional[_AlternatingPath]:
-    """Scan to expand the alternating trees.
-
-    The scan proceeds until either an augmenting path is found,
-    or the queue of S vertices becomes empty.
-
-    During the scan, new blossoms may be discovered and added to
-    the partial matching. Any such newly discovered blossoms are S-blossoms.
-
-    Returns:
-        Augmenting path if found; otherwise None.
-    """
-
-    edges = matching.graph.edges
-    adjacent_edges = matching.graph.adjacent_edges
-
-    # Process S-vertices waiting to be scanned.
-    while stage_data.queue:
-
-        # Take a vertex from the queue.
-        i = stage_data.queue.pop()
-
-        # Double-check that "v" is an S-vertex.
-        bi = matching.vertex_blossom[i]
-        assert stage_data.blossom_label[bi] == _LABEL_S
-
-        # Scan the edges that are incident on "v".
-        for e in adjacent_edges[i]:
-            (p, q, _w) = edges[e]
-            j = p if p != i else q  # TODO : consider abstracting this
-
-            # Consider the edge between vertices "i" and "j".
-            # Try to pull this edge into an alternating tree.
-
-            # Note: blossom index of vertex "i" may change during this loop,
-            # so we need to refresh it here.
-            bi = matching.vertex_blossom[i]
-            bj = matching.vertex_blossom[j]
-
-            # Ignore edges that are internal to a blossom.
-            if bi == bj:
-                continue
-
-            jlabel = stage_data.blossom_label[bj]
-
-            # Check whether this edge is tight (has zero slack).
-            # Only tight edges may be part of an alternating tree.
-            slack = matching.edge_slack_2x(e)
-            if slack <= 0:
-                if jlabel == _LABEL_NONE:
-                    # Assign label T to the blossom that contains vertex "j".
-                    _substage_assign_label_t(matching, stage_data, i, j)
-                elif jlabel == _LABEL_S:
-                    # This edge connects two S-blossoms. Use it to find
-                    # either a new blossom or an augmenting path.
-                    alternating_path = _substage_add_s_to_s_edge(matching,
-                                                                 stage_data,
-                                                                 i, j)
-                    if alternating_path is not None:
-                        return alternating_path
-
-            elif jlabel == _LABEL_S:
-                # Update tracking of least-slack edges between S-blossoms.
-                best_edge = stage_data.blossom_best_edge[bi]
-                if ((best_edge < 0)
-                        or (slack < matching.edge_slack_2x(best_edge))):
-                    stage_data.blossom_best_edge[bi] = e
-
-                # Update the list of least-slack edges to S-blossoms for
-                # the blossom that contains "i".
-                # We only do this for non-trivial blossoms.
-                if bi != i:
-                    best_edge_set = stage_data.blossom_best_edge_set[bi]
-                    assert best_edge_set is not None
-                    best_edge_set.append(e)
-
-            if jlabel != _LABEL_S:
-                # Update tracking of least-slack edges from vertex "j" to
-                # any S-vertex. We do this only for T-vertices and unlabeled
-                # vertices. Edges which already have zero slack are still
-                # tracked.
-                best_edge = stage_data.vertex_best_edge[j]
-                if best_edge < 0 or slack < matching.edge_slack_2x(best_edge):
-                    stage_data.vertex_best_edge[j] = e
-
-    # No further S vertices to scan, and no augmenting path found.
-    return None
-
-
-def _find_path_through_blossom(
-        matching: _PartialMatching,
-        b: int,
-        sub: int
-        ) -> tuple[list[int], list[tuple[int, int]]]:
-    """Construct a path through blossom "b" from sub-blossom "sub"
-    to the base of the blossom.
-
-    Return:
-        Tuple (nodes, edges).
-    """
-    blossom = matching.blossom[b]
-    assert blossom is not None
-
-    nodes: list[int] = [sub]
-    edges: list[tuple[int, int]] = []
-
-    # Walk around the blossom from "s" to its base.
-    p = blossom.subblossoms.index(sub)
-    nsub = len(blossom.subblossoms)
-    while p != 0:
-        if p % 2 == 0:
-            # Stepping towards the beginning of the subblossom list.
-            # Currently at subblossom (p), next position (p-2):
-            #
-            #  0 --- 1 === 2 --- 3 === (p-2) --- (p-1) ==(i,j)== (p)
-            #                           ^^^                      ^^^
-            #                               <-------------------
-            #
-            # We flip edges from (i,j) to (j,i) to make them fit
-            # in the path from "s" to base.
-            edges.append(blossom.edges[p-1][::-1])
-            nodes.append(blossom.subblossoms[p-1])
-            edges.append(blossom.edges[p-2][::-1])
-            nodes.append(blossom.subblossoms[p-2])
-            p -= 2
-        else:
-            # Stepping towards the end of the subblossom list.
-            # Currently at subblossom (p), next position (p+2):
-            #
-            #  (p) ==(i,j)== (p+1) --- (p+2) === (p+3) --- 0
-            #  ^^^                      ^^^
-            #      ------------------->
-            edges.append(blossom.edges[p])
-            nodes.append(blossom.subblossoms[p+1])
-            edges.append(blossom.edges[p+1])
-            nodes.append(blossom.subblossoms[(p+2) % nsub])
-            p = (p + 2) % nsub
-
-    return (nodes, edges)
-
-
-def _expand_t_blossom(
-        matching: _PartialMatching,
-        stage_data: _StageData,
-        b: int
-        ) -> None:
-    """Expand the specified T-blossom.
-
-    This function takes time O(n).
-    """
-
-    num_vertex = matching.graph.num_vertex
-
-    blossom = matching.blossom[b]
-    assert blossom is not None
-    assert matching.blossom_parent[b] == -1
-    assert stage_data.blossom_label[b] == _LABEL_T
-
-    # Convert sub-blossoms into top-level blossoms.
-    for sub in blossom.subblossoms:
-        matching.blossom_parent[sub] = -1
-        if sub < num_vertex:
-            matching.vertex_blossom[sub] = sub
-        else:
-            for i in matching.blossom_vertices(sub):
-                matching.vertex_blossom[i] = sub
-        assert stage_data.blossom_label[sub] == _LABEL_NONE
-
-    # The expanding blossom was part of an alternating tree, linked to
-    # a parent node in the tree via one of its subblossoms, and linked to
-    # a child node of the tree via the base vertex.
-    # We must reconstruct this part of the alternating tree, which will
-    # now run via sub-blossoms of the expanded blossom.
-
-    # Find the sub-blossom that is attached to the parent node in
-    # the alternating tree.
-# TODO : uglyness with the assertion
-    entry_link = stage_data.blossom_link[b]
-    assert entry_link is not None
-    (i, j) = entry_link
-    sub = matching.vertex_blossom[j]
-
-    # Assign label T to that sub-blossom.
-    stage_data.blossom_label[sub] = _LABEL_T
-    stage_data.blossom_link[sub] = (i, j)
-
-    # Walk through the expanded blossom from "sub" to the base vertex.
-    # Assign alternating S and T labels to the sub-blossoms and attach
-    # them to the alternating tree.
-    (path_nodes, path_edges) = _find_path_through_blossom(matching, b, sub)
-
-    for p in range(0, len(path_edges), 2):
-        #
-        #   (p) ==(j,i)== (p+1) ----- (p+2)
-        #    T              S           T
-        #
-        # path_nodes[p] has already been labeled T.
-        # We now assign labels to path_nodes[p+1] and path_nodes[p+2].
-
-        # Assign label S to path_nodes[p+1].
-        (j, i) = path_edges[p]
-        _substage_assign_label_s(matching, stage_data, i)
-
-        # Assign label T to path_nodes[i+2] and attach it to path_nodes[p+1].
-        sub = path_nodes[p+2]
-        stage_data.blossom_label[sub] = _LABEL_T
-        stage_data.blossom_link[sub] = path_edges[p+1]
-
-    # Unlabel and delete the expanded blossom. Recycle its blossom index.
-    stage_data.blossom_label[b] = _LABEL_NONE
-    stage_data.blossom_link[b] = None
-    matching.blossom[b] = None
-    matching.unused_blossoms.append(b)
-
-
-def _expand_zero_dual_blossoms(matching: _PartialMatching) -> None:
-    """Expand all blossoms with zero dual variable (recursively).
-
-    This function takes time O(n).
-    """
-
-    num_vertex = matching.graph.num_vertex
-
-    # Find top-level blossoms with zero slack.
-    stack: list[int] = []
-    for b in range(num_vertex, 2 * num_vertex):
-        blossom = matching.blossom[b]
-        if (blossom is not None) and (matching.blossom_parent[b] == -1):
-            # We basically expand only S-blossoms that were created after
-            # the most recent delta step. Those blossoms have dual variable
-            # _exactly_ zero. So this comparison is reliable, even in case
-            # of floating point edge weights.
-            if blossom.dual_var == 0:
-                stack.append(b)
-
-    # Use an explicit stack to avoid deep recursion.
-    while stack:
-        b = stack.pop()
-
-        # Expand blossom "b".
-
-        blossom = matching.blossom[b]
+    def edge_slack_2x(self, e: int) -> int|float:
+        """Return 2 times the slack of the edge with index "e".
+
+        The result is only valid for edges that are not between vertices
+        that belong to the same top-level blossom.
+
+        Multiplication by 2 ensures that the return value is an integer
+        if all edge weights are integers.
+        """
+        (i, j, w) = self.graph.edges[e]
+        assert self.vertex_blossom[i] != self.vertex_blossom[j]
+        return self.dual_var_2x[i] + self.dual_var_2x[j] - 2 * w
+
+    def get_blossom(self, b: int) -> _Blossom:
+        """Return the Blossom instance for blossom index "b"."""
+        blossom = self.blossom[b]
         assert blossom is not None
-        assert matching.blossom_parent[b] == -1
+        return blossom
 
-        # Examine sub-blossoms of "b".
-        for sub in blossom.subblossoms:
+    def blossom_vertices(self, b: int) -> list[int]:
+        """Return a list of vertex indices contained in blossom "b"."""
+        num_vertex = self.graph.num_vertex
+        if b < num_vertex:
+            return [b]
+        else:
+            # Use an explicit stack to avoid deep recursion.
+            stack: list[int] = [b]
+            nodes: list[int] = []
+            while stack:
+                b = stack.pop()
+                for sub in self.get_blossom(b).subblossoms:
+                    if sub < num_vertex:
+                        nodes.append(sub)
+                    else:
+                        stack.append(sub)
+        return nodes
 
-            # Mark the sub-blossom as a top-level blossom.
-            matching.blossom_parent[sub] = -1
+    def reset_stage(self) -> None:
+        """Reset data which are only valid during a stage.
 
-            if sub < num_vertex:
-                # Trivial sub-blossom. Mark it as top-level vertex.
-                matching.vertex_blossom[sub] = sub
+        Marks all blossoms as unlabeled, clears the queue,
+        and resets tracking of least-slack edges.
+        """
+
+        num_vertex = self.graph.num_vertex
+
+        # Remove blossom labels.
+        for b in range(2 * num_vertex):
+            self.blossom_label[b] = _LABEL_NONE
+            self.blossom_link[b] = None
+
+        # Clear the queue.
+        self.queue.clear()
+
+        # Reset least-slack edge tracking.
+        for i in range(num_vertex):
+            self.vertex_best_edge[i] = -1
+
+        for b in range(2 * num_vertex):
+            self.blossom_best_edge_set[b] = None
+            self.blossom_best_edge[b] = -1
+
+    def trace_alternating_paths(self, i: int, j: int) -> _AlternatingPath:
+        """Trace back through the alternating trees from vertices "i" and "j".
+
+        If both vertices are part of the same alternating tree, this function
+        discovers a new blossom. In this case it returns an alternating path
+        through the blossom that starts and ends in the same sub-blossom.
+
+        If the vertices are part of different alternating trees, this function
+        discovers an augmenting path. In this case it returns an alternating
+        path that starts and ends in an unmatched vertex.
+
+        This function takes time O(k) to discover a blossom, where "k" is the
+        number of sub-blossoms, or time O(n) to discover an augmenting path.
+
+        Returns:
+            Alternating path as an ordered list of edges between top-level
+            blossoms.
+        """
+
+        blossom_marker = self.blossom_marker
+        marked_blossoms: list[int] = []
+
+        # "iedges" is a list of edges used while tracing from "i".
+        # "jedges" is a list of edges used while tracing from "j".
+        iedges: list[tuple[int, int]] = []
+        jedges: list[tuple[int, int]] = []
+
+        # Pre-load the edge between "i" and "j" so it will end up in the right
+        # place in the final path.
+        iedges.append((i, j))
+
+        # Alternate between tracing the path from "i" and the path from "j".
+        # This ensures that the search time is bounded by the size of the
+        # newly found blossom.
+# TODO : this code is a bit shady; maybe reconsider the swapping trick
+        first_common = -1
+        while i != -1 or j != -1:
+
+            # Check if we found a common ancestor.
+            bi = self.vertex_blossom[i]
+            if blossom_marker[bi]:
+                first_common = bi
+                break
+
+            # Mark blossom as a potential common ancestor.
+            blossom_marker[bi] = True
+            marked_blossoms.append(bi)
+
+            # Track back through the link in the alternating tree.
+            link = self.blossom_link[bi]
+            if link is None:
+                # Reached the root of this alternating tree.
+                i = -1
             else:
-                # Non-trivial sub-blossom.
-                # If its dual variable is zero, expand it recursively.
-                if matching.get_blossom(sub).dual_var == 0:
-                    stack.append(sub)
+                iedges.append(link)
+                i = link[0]
+
+            # Swap "i" and "j" to alternate between paths.
+            if j != -1:
+                i, j = j, i
+                iedges, jedges = jedges, iedges
+
+        # Remove all markers we placed.
+        for b in marked_blossoms:
+            blossom_marker[b] = False
+
+        # If we found a common ancestor, trim the paths so they end there.
+# TODO : also this is just plain ugly - try to rework
+        if first_common != -1:
+            assert self.vertex_blossom[iedges[-1][0]] == first_common
+            while (jedges
+                    and (self.vertex_blossom[jedges[-1][0]] != first_common)):
+                jedges.pop()
+
+        # Fuse the two paths.
+        # Flip the order of one path and the edge tuples in the other path
+        # to obtain a continuous path with correctly ordered edge tuples.
+        path_edges = iedges[::-1] + [(j, i) for (i, j) in jedges]
+
+        # Any S-to-S alternating path must have odd length.
+        assert len(path_edges) % 2 == 1
+
+        return _AlternatingPath(path_edges)
+
+    def make_blossom(self, path: _AlternatingPath) -> None:
+        """Create a new blossom from an alternating cycle.
+
+        Assign label S to the new blossom.
+        Relabel all T-sub-blossoms as S and add their vertices to the queue.
+
+        This function takes time O(n).
+        """
+
+        num_vertex = self.graph.num_vertex
+
+        # Check that the path is odd-length.
+        assert len(path.edges) % 2 == 1
+        assert len(path.edges) >= 3
+
+        # Construct the list of sub-blossoms (current top-level blossoms).
+        subblossoms = [self.vertex_blossom[i] for (i, j) in path.edges]
+
+        # Check that the path is cyclic.
+        # Note the path may not start and end with the same _vertex_,
+        # but it must start and end in the same _blossom_.
+        subblossoms_next = [self.vertex_blossom[j] for (i, j) in path.edges]
+        assert subblossoms[0] == subblossoms_next[-1]
+        assert subblossoms[1:] == subblossoms_next[:-1]
+
+        # Determine the base vertex of the new blossom.
+        base_blossom = subblossoms[0]
+        if base_blossom >= num_vertex:
+            base_vertex = self.get_blossom(base_blossom).base_vertex
+        else:
+            base_vertex = base_blossom
+
+        # Create the new blossom object.
+        blossom = _Blossom(subblossoms, path.edges, base_vertex)
+
+        # Allocate a new blossom index and create the blossom object.
+        b = self.unused_blossoms.pop()
+        self.blossom[b] = blossom
+        self.blossom_parent[b] = -1
+
+        # Link the subblossoms to the their new parent.
+        for sub in subblossoms:
+            self.blossom_parent[sub] = b
+
+        # Update blossom-membership of all vertices in the new blossom.
+        # NOTE: This step takes O(n) time per blossom formation, and adds up
+        #       to O(n**2) total time per stage.
+        #       This could be improved through a union-find datastructure, or
+        #       by re-using the blossom index of the largest sub-blossom.
+        for i in self.blossom_vertices(b):
+            self.vertex_blossom[i] = b
+
+        # Assign label S to the new blossom.
+        assert self.blossom_label[base_blossom] == _LABEL_S
+        self.blossom_label[b] = _LABEL_S
+        self.blossom_link[b] = self.blossom_link[base_blossom]
+
+        # Former T-vertices which are part of this blossom have now become
+        # S-vertices. Add them to the queue.
+        for sub in subblossoms:
+            if self.blossom_label[sub] == _LABEL_T:
+                if sub < num_vertex:
+                    self.queue.append(sub)
                 else:
-                    # This sub-blossom will not be expanded;
-                    # it now becomes top-level. Update its vertices
-                    # to point to this sub-blossom.
-                    for i in matching.blossom_vertices(sub):
-                        matching.vertex_blossom[i] = sub
+                    self.queue.extend(self.blossom_vertices(sub))
 
-        # Delete the expanded blossom. Recycle its blossom index.
-        matching.blossom[b] = None
-        matching.unused_blossoms.append(b)
+        # Calculate the set of least-slack edges to other S-blossoms.
+        # We basically merge the edge lists from all sub-blossoms, but reject
+        # edges that are internal to this blossom, and trim the set such that
+        # there is at most one edge to each external S-blossom.
+        #
+        # Sub-blossoms that were formerly labeled T can be ignored; their
+        # vertices are in the queue and will discover neighbouring S-blossoms
+        # via the edge scan process.
+        #
+        # Build a temporary array holding the least-slack edge index to
+        # each top-level S-blossom.
+        #
+        # NOTE: This step takes O(n) time per blossom formation, and adds up
+        #       to O(n**2) total time per stage.
+        #       For sparse graphs, this could be improved by tracking
+        #       least-slack edges in a priority queue.
+        best_edge_to_blossom: list[int] = (2 * num_vertex) * [-1]
+        zero_slack: int|float = 0
+        best_slack_to_blossom: list[int|float] = (
+            (2 * num_vertex) * [zero_slack])
 
+        # Add the least-slack edges of every S-sub-blossom.
+        for sub in subblossoms:
+            if self.blossom_label[sub] != _LABEL_S:
+                continue
+            if sub < num_vertex:
+                # Trivial blossoms don't have a list of least-slack edges,
+                # so we just look at all adjacent edges. This happens at most
+                # once per vertex per stage. It adds up to O(m) time per stage.
+                sub_edge_set = self.graph.adjacent_edges[sub]
+            else:
+                # Use the edge list of the sub-blossom, then delete it from
+                # the sub-blossom.
+                sub_edge_set_opt = self.blossom_best_edge_set[sub]
+                assert sub_edge_set_opt is not None
+                sub_edge_set = sub_edge_set_opt
+                self.blossom_best_edge_set[sub] = None
 
-def _augment_blossom(matching: _PartialMatching, b: int, i: int) -> None:
-    """Augment along an alternating path through blossom "b", from vertex "i"
-    to the base vertex of the blossom.
+            # Add edges to the temporary array.
+            for e in sub_edge_set:
+                (i, j, _w) = self.graph.edges[e]
+                bi = self.vertex_blossom[i]
+                bj = self.vertex_blossom[j]
+                assert (bi == b) or (bj == b)
 
-    This function takes time O(n).
-    """
-    num_vertex = matching.graph.num_vertex
+                # Reject internal edges in this blossom.
+                if bi == bj:
+                    continue
 
-    # Use an explicit stack to avoid deep recursion.
-    stack = [(b, i)]
+                # Set bi = other blossom which is reachable through this edge.
+                bi = bj if (bi == b) else bi
 
-    while stack:
-        (top_blossom, sub) = stack.pop()
-        b = matching.blossom_parent[sub]
+                # Reject edges that don't link to an S-blossom.
+                if self.blossom_label[bi] != _LABEL_S:
+                    continue
 
-        if b != top_blossom:
-            # Set up to continue augmenting through the parent of "b".
-            stack.append((top_blossom, b))
+                # Keep only the least-slack edge to "vblossom".
+                slack = self.edge_slack_2x(e)
+                if ((best_edge_to_blossom[bi] == -1)
+                        or (slack < best_slack_to_blossom[bi])):
+                    best_edge_to_blossom[bi] = e
+                    best_slack_to_blossom[bi] = slack
 
-        # Augment blossom "b" from subblossom "sub" to the base of the
-        # blossom. Afterwards, "sub" contains the new base vertex.
+        # Extract a compact list of least-slack edge indices.
+        # We can not keep the temporary array because that would blow up
+        # memory use to O(n**2).
+        best_edge_set = [e for e in best_edge_to_blossom if e != -1]
+        self.blossom_best_edge_set[b] = best_edge_set
 
-        blossom = matching.blossom[b]
+        # Select the overall least-slack edge to any other S-blossom.
+        best_edge = -1
+        best_slack: int|float = 0
+        for e in best_edge_set:
+            slack = self.edge_slack_2x(e)
+            if (best_edge == -1) or (slack < best_slack):
+                best_edge = e
+                best_slack = slack
+        self.blossom_best_edge[b] = best_edge
+
+    def find_path_through_blossom(
+            self,
+            b: int,
+            sub: int
+            ) -> tuple[list[int], list[tuple[int, int]]]:
+        """Construct a path through blossom "b" from sub-blossom "sub"
+        to the base of the blossom.
+
+        Return:
+            Tuple (nodes, edges).
+        """
+        blossom = self.blossom[b]
         assert blossom is not None
+
+# TODO : consider whether we can do without the explicit list of nodes (if not, that's fine too)
+
+        nodes: list[int] = [sub]
+        edges: list[tuple[int, int]] = []
+
+        # Walk around the blossom from "sub" to its base.
+        p = blossom.subblossoms.index(sub)
+        nsub = len(blossom.subblossoms)
+        while p != 0:
+            if p % 2 == 0:
+                # Stepping towards the beginning of the subblossom list.
+                # Currently at subblossom (p), next position (p-2):
+                #
+                #  0 --- 1 === 2 --- 3 === (p-2) --- (p-1) ==(i,j)== (p)
+                #                           ^^^                      ^^^
+                #                               <-------------------
+                #
+                # We flip edges from (i,j) to (j,i) to make them fit
+                # in the path from "s" to base.
+                edges.append(blossom.edges[p-1][::-1])
+                nodes.append(blossom.subblossoms[p-1])
+                edges.append(blossom.edges[p-2][::-1])
+                nodes.append(blossom.subblossoms[p-2])
+                p -= 2
+            else:
+                # Stepping towards the end of the subblossom list.
+                # Currently at subblossom (p), next position (p+2):
+                #
+                #  (p) ==(i,j)== (p+1) --- (p+2) === (p+3) --- 0
+                #  ^^^                      ^^^
+                #      ------------------->
+                edges.append(blossom.edges[p])
+                nodes.append(blossom.subblossoms[p+1])
+                edges.append(blossom.edges[p+1])
+                nodes.append(blossom.subblossoms[(p+2) % nsub])
+                p = (p + 2) % nsub
+
+        return (nodes, edges)
+
+    def expand_t_blossom(self, b: int) -> None:
+        """Expand the specified T-blossom.
+
+        This function takes time O(n).
+        """
+
+        num_vertex = self.graph.num_vertex
+
+        blossom = self.blossom[b]
+        assert blossom is not None
+        assert self.blossom_parent[b] == -1
+        assert self.blossom_label[b] == _LABEL_T
+
+        # Convert sub-blossoms into top-level blossoms.
+        for sub in blossom.subblossoms:
+            self.blossom_parent[sub] = -1
+            if sub < num_vertex:
+                self.vertex_blossom[sub] = sub
+            else:
+                for i in self.blossom_vertices(sub):
+                    self.vertex_blossom[i] = sub
+            assert self.blossom_label[sub] == _LABEL_NONE
+
+        # The expanding blossom was part of an alternating tree, linked to
+        # a parent node in the tree via one of its subblossoms, and linked to
+        # a child node of the tree via the base vertex.
+        # We must reconstruct this part of the alternating tree, which will
+        # now run via sub-blossoms of the expanded blossom.
+
+        # Find the sub-blossom that is attached to the parent node in
+        # the alternating tree.
+# TODO : uglyness with the assertion
+        entry_link = self.blossom_link[b]
+        assert entry_link is not None
+        (i, j) = entry_link
+        sub = self.vertex_blossom[j]
+
+        # Assign label T to that sub-blossom.
+        self.blossom_label[sub] = _LABEL_T
+        self.blossom_link[sub] = (i, j)
 
         # Walk through the expanded blossom from "sub" to the base vertex.
-        (path_nodes, path_edges) = _find_path_through_blossom(matching,
-                                                              b, sub)
+        # Assign alternating S and T labels to the sub-blossoms and attach
+        # them to the alternating tree.
+        (path_nodes, path_edges) = self.find_path_through_blossom(b, sub)
 
         for p in range(0, len(path_edges), 2):
-            # Before augmentation:
-            #   path_nodes[p] is matched to path_nodes[p+1]
             #
-            #   (p) ===== (p+1) ---(i,j)--- (p+2)
+            #   (p) ==(j,i)== (p+1) ----- (p+2)
+            #    T              S           T
             #
-            # After augmentation:
-            #   path_nodes[p+1] is mathed to path_nodes[p+2] via edge (i, j)
-            #
-            #   (p) ----- (p+1) ===(i,j)=== (p+2)
-            #
+            # path_nodes[p] has already been labeled T.
+            # We now assign labels to path_nodes[p+1] and path_nodes[p+2].
 
-            # Pull the edge (i, j) into the matching.
-            (i, j) = path_edges[p+1]
-            matching.vertex_mate[i] = j
-            matching.vertex_mate[j] = i
+            # Assign label S to path_nodes[p+1].
+            (j, i) = path_edges[p]
+            self.assign_label_s(i)
 
-            # Augment through the subblossoms touching the edge (i, j).
-            # Nothing needs to be done for trivial subblossoms.
-            bi = path_nodes[p+1]
-            if bi >= num_vertex:
-                stack.append((bi, i))
+            # Assign label T to path_nodes[i+2] and attach it to path_nodes[p+1].
+            sub = path_nodes[p+2]
+            self.blossom_label[sub] = _LABEL_T
+            self.blossom_link[sub] = path_edges[p+1]
 
-            bj = path_nodes[p+2]
-            if bj >= num_vertex:
-                stack.append((bj, j))
+        # Unlabel and delete the expanded blossom. Recycle its blossom index.
+        self.blossom_label[b] = _LABEL_NONE
+        self.blossom_link[b] = None
+        self.blossom[b] = None
+        self.unused_blossoms.append(b)
 
-        # Rotate the subblossom list so the new base ends up in position 0.
-        p = blossom.subblossoms.index(sub)
-        blossom.subblossoms = (
-            blossom.subblossoms[p:] + blossom.subblossoms[:p])
-        blossom.edges = blossom.edges[p:] + blossom.edges[:p]
+    def expand_zero_dual_blossoms(self) -> None:
+        """Expand all blossoms with zero dual variable (recursively).
 
-        # Update the base vertex.
-        # We can pull this from the sub-blossom where we started since
-        # its augmentation has already finished.
-        if sub < num_vertex:
-            blossom.base_vertex = sub
-        else:
-            blossom.base_vertex = matching.get_blossom(sub).base_vertex
+        Note that this function runs at the end of a stage.
+        Blossoms are not labeled. Least-slack edges are not tracked.
 
+        This function takes time O(n).
+        """
 
-def _augment_matching(
-        matching: _PartialMatching,
-        path: _AlternatingPath
-        ) -> None:
-    """Augment the matching through the specified augmenting path.
+        num_vertex = self.graph.num_vertex
 
-    This function takes time O(n).
-    """
+# TODO : clean up explicit stack
 
-    # Check that the augmenting path starts and ends in an unmatched vertex
-    # or a blossom with unmatched base.
-    assert len(path.edges) % 2 == 1
-    for i in (path.edges[0][0], path.edges[-1][1]):
-        b = matching.vertex_blossom[i]
-        if b != i:
-            i = matching.get_blossom(b).base_vertex
-        assert matching.vertex_mate[i] == -1
+        # Find top-level blossoms with zero slack.
+        stack: list[int] = []
+        for b in range(num_vertex, 2 * num_vertex):
+            blossom = self.blossom[b]
+            if (blossom is not None) and (self.blossom_parent[b] == -1):
+                # We typically expand only S-blossoms that were created after
+                # the most recent delta step. Those blossoms have _exactly_
+                # zero dual. So this comparison is reliable, even in case
+                # of floating point edge weights.
+                if blossom.dual_var == 0:
+                    stack.append(b)
 
-    # Consider the edges of the augmenting path that are currently not
-    # part of the matching but will become part of it.
-    for (i, j) in path.edges[0::2]:
+        # Use an explicit stack to avoid deep recursion.
+        while stack:
+            b = stack.pop()
 
-        # Augment through non-trivial blossoms on either side of this edge.
-        bi = matching.vertex_blossom[i]
-        if bi != i:
-            _augment_blossom(matching, bi, i)
+            # Expand blossom "b".
 
-        bj = matching.vertex_blossom[j]
-        if bj != j:
-            _augment_blossom(matching, bj, j)
+            blossom = self.blossom[b]
+            assert blossom is not None
+            assert self.blossom_parent[b] == -1
 
-        # Pull the edge into the matching.
-        matching.vertex_mate[i] = j
-        matching.vertex_mate[j] = i
+            # Examine sub-blossoms of "b".
+            for sub in blossom.subblossoms:
 
+                # Mark the sub-blossom as a top-level blossom.
+                self.blossom_parent[sub] = -1
 
-def _calc_dual_delta(
-        matching: _PartialMatching,
-        stage_data: _StageData
-        ) -> tuple[int, float|int, int, int]:
-    """Calculate a delta step in the dual LPP problem.
-
-    This function returns the minimum of the 4 types of delta values,
-    and the type of delta which obtain the minimum, and the edge or blossom
-    that produces the minimum delta, if applicable.
-
-    The returned value is 2 times the actual delta value.
-    Multiplication by 2 ensures that the result is an integer if all edge
-    weights are integers.
-
-    This function assumes that there is at least one S-vertex.
-    This function takes time O(n).
-
-    Returns:
-        Tuple (delta_type, delta, delta_edge, delta_blossom).
-    """
-    num_vertex = matching.graph.num_vertex
-
-    delta_edge = -1
-    delta_blossom = -1
-
-    # Compute delta1: minimum dual variable of any S-vertex.
-    delta_type = 1
-    delta_2x = min(
-        matching.dual_var_2x[i]
-        for i in range(num_vertex)
-        if stage_data.blossom_label[matching.vertex_blossom[i]] == _LABEL_S)
-
-    # Compute delta2: minimum slack of any edge between an S-vertex and
-    # an unlabeled vertex.
-    for i in range(num_vertex):
-        bi = matching.vertex_blossom[i]
-        if stage_data.blossom_label[bi] == _LABEL_NONE:
-            e = stage_data.vertex_best_edge[i]
-            if e != -1:
-                slack = matching.edge_slack_2x(e)
-                if slack <= delta_2x:
-                    delta_type = 2
-                    delta_2x = slack
-                    delta_edge = e
-
-    # Compute delta3: half minimum slack of any edge between two top-level
-    # S-blossoms.
-    for b in range(2 * matching.graph.num_vertex):
-        if (stage_data.blossom_label[b] == _LABEL_S
-                and matching.blossom_parent[b] == -1):
-            e = stage_data.blossom_best_edge[b]
-            if e != -1:
-                slack = matching.edge_slack_2x(e)
-                if matching.graph.integer_weights:
-                    # If all edge weights are even integers, the slack
-                    # of any edge between two S blossoms is also an even
-                    # integer. Therefore the delta is an integer.
-                    assert slack % 2 == 0
-                    slack = slack // 2
+                if sub < num_vertex:
+                    # Trivial sub-blossom. Mark it as top-level vertex.
+                    self.vertex_blossom[sub] = sub
                 else:
-                    slack = slack / 2
-                if slack <= delta_2x:
-                    delta_type = 3
+                    # Non-trivial sub-blossom.
+                    # If its dual variable is zero, expand it recursively.
+                    if self.get_blossom(sub).dual_var == 0:
+                        stack.append(sub)
+                    else:
+                        # This sub-blossom will not be expanded;
+                        # it now becomes top-level. Update its vertices
+                        # to point to this sub-blossom.
+                        for i in self.blossom_vertices(sub):
+                            self.vertex_blossom[i] = sub
+
+            # Delete the expanded blossom. Recycle its blossom index.
+            self.blossom[b] = None
+            self.unused_blossoms.append(b)
+
+    def augment_blossom(self, b: int, i: int) -> None:
+        """Augment along an alternating path through blossom "b",
+        from vertex "i" to the base vertex of the blossom.
+
+        This function takes time O(n).
+        """
+        num_vertex = self.graph.num_vertex
+
+# TODO : cleanup explicit stack
+
+        # Use an explicit stack to avoid deep recursion.
+        stack = [(b, i)]
+
+        while stack:
+            (top_blossom, sub) = stack.pop()
+            b = self.blossom_parent[sub]
+
+            if b != top_blossom:
+                # Set up to continue augmenting through the parent of "b".
+                stack.append((top_blossom, b))
+
+            # Augment blossom "b" from subblossom "sub" to the base of the
+            # blossom. Afterwards, "sub" contains the new base vertex.
+
+            blossom = self.blossom[b]
+            assert blossom is not None
+
+            # Walk through the expanded blossom from "sub" to the base vertex.
+            (path_nodes, path_edges) = self.find_path_through_blossom(b, sub)
+
+            for p in range(0, len(path_edges), 2):
+                # Before augmentation:
+                #   path_nodes[p] is matched to path_nodes[p+1]
+                #
+                #   (p) ===== (p+1) ---(i,j)--- (p+2)
+                #
+                # After augmentation:
+                #   path_nodes[p+1] matched to path_nodes[p+2] via edge (i,j)
+                #
+                #   (p) ----- (p+1) ===(i,j)=== (p+2)
+                #
+
+                # Pull the edge (i, j) into the matching.
+                (i, j) = path_edges[p+1]
+                self.vertex_mate[i] = j
+                self.vertex_mate[j] = i
+
+                # Augment through the subblossoms touching the edge (i, j).
+                # Nothing needs to be done for trivial subblossoms.
+                bi = path_nodes[p+1]
+                if bi >= num_vertex:
+                    stack.append((bi, i))
+
+                bj = path_nodes[p+2]
+                if bj >= num_vertex:
+                    stack.append((bj, j))
+
+            # Rotate the subblossom list so the new base ends up in position 0.
+            p = blossom.subblossoms.index(sub)
+            blossom.subblossoms = (
+                blossom.subblossoms[p:] + blossom.subblossoms[:p])
+            blossom.edges = blossom.edges[p:] + blossom.edges[:p]
+
+            # Update the base vertex.
+            # We can pull this from the sub-blossom where we started since
+            # its augmentation has already finished.
+            if sub < num_vertex:
+                blossom.base_vertex = sub
+            else:
+                blossom.base_vertex = self.get_blossom(sub).base_vertex
+
+    def augment_matching(self, path: _AlternatingPath) -> None:
+        """Augment the matching through the specified augmenting path.
+
+        This function takes time O(n).
+        """
+
+        # Check that the augmenting path starts and ends in
+        # an unmatched vertex or a blossom with unmatched base.
+        assert len(path.edges) % 2 == 1
+        for i in (path.edges[0][0], path.edges[-1][1]):
+            b = self.vertex_blossom[i]
+            if b != i:
+                i = self.get_blossom(b).base_vertex
+            assert self.vertex_mate[i] == -1
+
+        # The augmenting path looks like this:
+        #
+        #   (unmatched) ---- (B) ==== (B) ---- (B) ==== (B) ---- (unmatched)
+        #
+        # The first and last vertex (or blossom) of the path are unmatched
+        # (or have unmatched base vertex). After augmenting, those vertices
+        # will be matched. All matched edges on the path become unmatched,
+        # and unmatched edges become matched.
+        #
+        # This loop walks along the edges of this path that were not matched
+        # before augmenting.
+        for (i, j) in path.edges[0::2]:
+
+            # Augment the non-trivial blossoms on either side of this edge.
+            # No action is necessary for trivial blossoms.
+            bi = self.vertex_blossom[i]
+            if bi != i:
+                self.augment_blossom(bi, i)
+
+            bj = self.vertex_blossom[j]
+            if bj != j:
+                self.augment_blossom(bj, j)
+
+            # Pull the edge into the matching.
+            self.vertex_mate[i] = j
+            self.vertex_mate[j] = i
+
+    def assign_label_s(self, i: int) -> None:
+        """Assign label S to the unlabeled blossom that contains vertex "i".
+
+        If vertex "i" is matched, it is attached to the alternating tree
+        via its matched edge. If vertex "i" is unmatched, it becomes the root
+        of an alternating tree.
+
+        All vertices in the newly labeled blossom are added to the scan queue.
+
+        Precondition:
+            "i" is an unlabeled vertex, either unmatched or matched to
+            a T-vertex via a tight edge.
+        """
+
+        # Assign label S to the blossom that contains vertex "v".
+        bi = self.vertex_blossom[i]
+        assert self.blossom_label[bi] == _LABEL_NONE
+        self.blossom_label[bi] = _LABEL_S
+
+        j = self.vertex_mate[i]
+        if j == -1:
+            # Vertex "i" is unmatched.
+            # It must be either a top-level vertex or the base vertex of
+            # a top-level blossom.
+            assert (bi == i) or (self.get_blossom(bi).base_vertex == i)
+
+            # Mark the blossom that contains "v" as root of an alternating tree.
+            self.blossom_link[bi] = None
+
+        else:
+            # Vertex "i" is matched to T-vertex "j".
+            bj = self.vertex_blossom[j]
+            assert self.blossom_label[bj] == _LABEL_T
+
+            # Attach the blossom that contains "i" to the alternating tree.
+            self.blossom_link[bi] = (j, i)
+
+        # Initialize the least-slack edge list of the newly labeled blossom.
+        # This list will be filled by scanning the vertices of the blossom.
+        self.blossom_best_edge_set[bi] = []
+
+        # Add all vertices inside the newly labeled S-blossom to the queue.
+        if bi == i:
+            self.queue.append(i)
+        else:
+            self.queue.extend(self.blossom_vertices(bi))
+
+    def assign_label_t(self, i: int, j: int) -> None:
+        """Assign label T to the unlabeled blossom that contains vertex "j".
+
+        Attach it to the alternating tree via edge (i, j).
+        Then immediately assign label S to the mate of vertex "j".
+
+        Preconditions:
+         - "i" is an S-vertex.
+         - "j" is an unlabeled, matched vertex.
+         - There is a tight edge between vertices "i" and "j".
+        """
+        assert self.blossom_label[self.vertex_blossom[i]] == _LABEL_S
+
+        # Assign label T to the unlabeled blossom.
+        bj = self.vertex_blossom[j]
+        assert self.blossom_label[bj] == _LABEL_NONE
+        self.blossom_label[bj] = _LABEL_T
+        self.blossom_link[bj] = (i, j)
+
+        # Assign label S to the blossom that contains the mate of vertex "j".
+        jbase = j if bj == j else self.get_blossom(bj).base_vertex
+        k = self.vertex_mate[jbase]
+        assert k != -1
+        self.assign_label_s(k)
+
+    def add_s_to_s_edge(self, i: int, j: int) -> Optional[_AlternatingPath]:
+        """Add the edge between S-vertices "i" and "j".
+
+        If the edge connects blossoms that are part of the same alternating
+        tree, this function creates a new S-blossom and returns None.
+
+        If the edge connects two different alternating trees, an augmenting
+        path has been discovered. In this case the function changes nothing
+        and returns the augmenting path.
+
+        Returns:
+            Augmenting path if found; otherwise None.
+        """
+
+        # Trace back through the alternating trees from "i" and "j".
+        path = self.trace_alternating_paths(i, j)
+
+        # If the path is a cycle, create a new blossom.
+        # Otherwise the path is an augmenting path.
+        # Note that an alternating starts and ends in the same blossom,
+        # but not necessarily in the same vertex within that blossom.
+        p = path.edges[0][0]
+        q = path.edges[-1][1]
+        if self.vertex_blossom[p] == self.vertex_blossom[q]:
+            self.make_blossom(path)
+            return None
+        else:
+            return path
+
+    def substage_scan(self) -> Optional[_AlternatingPath]:
+        """Scan queued S-vertices to expand the alternating trees.
+
+        The scan proceeds until either an augmenting path is found,
+        or the queue of S-vertices becomes empty.
+
+        New blossoms may be created during the scan.
+
+        Returns:
+            Augmenting path if found; otherwise None.
+        """
+
+        edges = self.graph.edges
+        adjacent_edges = self.graph.adjacent_edges
+
+        # Process S-vertices waiting to be scanned.
+        while self.queue:
+
+            # Take a vertex from the queue.
+            i = self.queue.pop()
+
+            # Double-check that "v" is an S-vertex.
+            bi = self.vertex_blossom[i]
+            assert self.blossom_label[bi] == _LABEL_S
+
+            # Scan the edges that are incident on "v".
+            for e in adjacent_edges[i]:
+                (p, q, _w) = edges[e]
+                j = p if p != i else q  # TODO : consider abstracting this
+
+                # Consider the edge between vertices "i" and "j".
+                # Try to pull this edge into an alternating tree.
+
+                # Note: blossom index of vertex "i" may change during
+                # this loop, so we need to refresh it here.
+                bi = self.vertex_blossom[i]
+                bj = self.vertex_blossom[j]
+
+                # Ignore edges that are internal to a blossom.
+                if bi == bj:
+                    continue
+
+                jlabel = self.blossom_label[bj]
+
+                # Check whether this edge is tight (has zero slack).
+                # Only tight edges may be part of an alternating tree.
+                slack = self.edge_slack_2x(e)
+                if slack <= 0:
+                    if jlabel == _LABEL_NONE:
+                        # Assign label T to the blossom that contains "j".
+                        self.assign_label_t(i, j)
+                    elif jlabel == _LABEL_S:
+                        # This edge connects two S-blossoms. Use it to find
+                        # either a new blossom or an augmenting path.
+                        alternating_path = self.add_s_to_s_edge(i, j)
+                        if alternating_path is not None:
+                            return alternating_path
+
+                elif jlabel == _LABEL_S:
+                    # Update tracking of least-slack edges between S-blossoms.
+                    best_edge = self.blossom_best_edge[bi]
+                    if ((best_edge < 0)
+                            or (slack < self.edge_slack_2x(best_edge))):
+                        self.blossom_best_edge[bi] = e
+
+                    # Update the list of least-slack edges to S-blossoms for
+                    # the blossom that contains "i".
+                    # We only do this for non-trivial blossoms.
+                    if bi != i:
+                        best_edge_set = self.blossom_best_edge_set[bi]
+                        assert best_edge_set is not None
+                        best_edge_set.append(e)
+
+                if jlabel != _LABEL_S:
+                    # Update tracking of least-slack edges from vertex "j" to
+                    # any S-vertex. We do this for T-vertices and unlabeled
+                    # vertices. Edges which already have zero slack are still
+                    # tracked.
+                    best_edge = self.vertex_best_edge[j]
+                    if best_edge < 0 or slack < self.edge_slack_2x(best_edge):
+                        self.vertex_best_edge[j] = e
+
+        # No further S vertices to scan, and no augmenting path found.
+        return None
+
+    def substage_calc_dual_delta(self) -> tuple[int, float|int, int, int]:
+        """Calculate a delta step in the dual LPP problem.
+
+        This function returns the minimum of the 4 types of delta values,
+        and the type of delta which obtain the minimum, and the edge or
+        blossom that produces the minimum delta, if applicable.
+
+        The returned value is 2 times the actual delta value.
+        Multiplication by 2 ensures that the result is an integer if all edge
+        weights are integers.
+
+        This function assumes that there is at least one S-vertex.
+        This function takes time O(n).
+
+        Returns:
+            Tuple (delta_type, delta_2x, delta_edge, delta_blossom).
+        """
+        num_vertex = self.graph.num_vertex
+
+        delta_edge = -1
+        delta_blossom = -1
+
+        # Compute delta1: minimum dual variable of any S-vertex.
+        delta_type = 1
+        delta_2x = min(
+            self.dual_var_2x[i]
+            for i in range(num_vertex)
+            if self.blossom_label[self.vertex_blossom[i]] == _LABEL_S)
+
+        # Compute delta2: minimum slack of any edge between an S-vertex and
+        # an unlabeled vertex.
+        for i in range(num_vertex):
+            bi = self.vertex_blossom[i]
+            if self.blossom_label[bi] == _LABEL_NONE:
+                e = self.vertex_best_edge[i]
+                if e != -1:
+                    slack = self.edge_slack_2x(e)
+                    if slack <= delta_2x:
+                        delta_type = 2
+                        delta_2x = slack
+                        delta_edge = e
+
+        # Compute delta3: half minimum slack of any edge between two top-level
+        # S-blossoms.
+        for b in range(2 * num_vertex):
+            if ((self.blossom_label[b] == _LABEL_S)
+                    and (self.blossom_parent[b] == -1)):
+                e = self.blossom_best_edge[b]
+                if e != -1:
+                    slack = self.edge_slack_2x(e)
+                    if self.graph.integer_weights:
+                        # If all edge weights are even integers, the slack
+                        # of any edge between two S blossoms is also an even
+                        # integer. Therefore the delta is an integer.
+                        assert slack % 2 == 0
+                        slack = slack // 2
+                    else:
+                        slack = slack / 2
+                    if slack <= delta_2x:
+                        delta_type = 3
+                        delta_2x = slack
+                        delta_edge = e
+
+        # Compute delta4: half minimum dual variable of a top-level T-blossom.
+        for b in range(num_vertex, 2 * num_vertex):
+            if (self.blossom_label[b] == _LABEL_T
+                    and self.blossom_parent[b] == -1):
+                slack = self.get_blossom(b).dual_var
+                if slack < delta_2x:
+                    delta_type = 4
                     delta_2x = slack
-                    delta_edge = e
+                    delta_blossom = b
 
-    # Compute delta4: half minimum dual variable of any T-blossom.
-    for b in range(num_vertex, 2 * num_vertex):
-        if (stage_data.blossom_label[b] == _LABEL_T
-                and matching.blossom_parent[b] == -1):
-            slack = matching.get_blossom(b).dual_var
-            if slack < delta_2x:
-                delta_type = 4
-                delta_2x = slack
-                delta_blossom = b
+        return (delta_type, delta_2x, delta_edge, delta_blossom)
 
-    return (delta_type, delta_2x, delta_edge, delta_blossom)
+    def substage_apply_delta_step(self, delta_2x: int|float) -> None:
+        """Apply a delta step to the dual LPP variables."""
 
+        num_vertex = self.graph.num_vertex
 
-def _apply_delta_step(
-        matching: _PartialMatching,
-        stage_data: _StageData,
-        delta_2x: int|float
-        ) -> None:
-    """Apply a delta step to the dual LPP variables."""
+        # Apply delta to dual variables of all vertices.
+        for i in range(num_vertex):
+            ilabel = self.blossom_label[self.vertex_blossom[i]]
+            if ilabel == _LABEL_S:
+                # S-vertex: subtract delta from dual variable.
+                self.dual_var_2x[i] -= delta_2x
+            elif ilabel == _LABEL_T:
+                # T-vertex: add delta to dual variable.
+                self.dual_var_2x[i] += delta_2x
 
-    num_vertex = matching.graph.num_vertex
+        # Apply delta to dual variables of top-level non-trivial blossoms.
+        for b in range(num_vertex, 2 * num_vertex):
+            if self.blossom_parent[b] == -1:
+                blabel = self.blossom_label[b]
+                if blabel == _LABEL_S:
+                    # S-blossom: add 2*delta to dual variable.
+                    self.get_blossom(b).dual_var += delta_2x
+                elif blabel == _LABEL_T:
+                    # T-blossom: subtract 2*delta from dual variable.
+                    self.get_blossom(b).dual_var -= delta_2x
 
-    # Apply delta to dual variables of all vertices.
-    for i in range(num_vertex):
-        ilabel = stage_data.blossom_label[matching.vertex_blossom[i]]
-        if ilabel == _LABEL_S:
-            # S-vertex: subtract delta from dual variable.
-            matching.dual_var_2x[i] -= delta_2x
-        elif ilabel == _LABEL_T:
-            # T-vertex: add delta to dual variable.
-            matching.dual_var_2x[i] += delta_2x
+    def run_stage(self) -> bool:
+        """Run one stage of the matching algorithm.
 
-    # Apply delta to dual variables of top-level non-trivial blossoms.
-    for b in range(num_vertex, 2 * num_vertex):
-        if matching.blossom_parent[b] == -1:
-            blabel = stage_data.blossom_label[b]
-            if blabel == _LABEL_S:
-                # S-blossom: add 2*delta to dual variable.
-                matching.get_blossom(b).dual_var += delta_2x
-            elif blabel == _LABEL_T:
-                # T-blossom: subtract 2*delta from dual variable.
-                matching.get_blossom(b).dual_var -= delta_2x
+        The stage searches a maximum-weight augmenting path.
+        If this path is found, it is used to augment the matching,
+        thereby increasing the number of matched edges by 1.
+        If no such path is found, the matching must already be optimal.
 
+        This function takes time O(n**2).
 
-def _run_stage(matching: _PartialMatching) -> bool:
-    """Run one stage of the matching algorithm.
+        Returns:
+            True if the matching was successfully augmented.
+            False if no further improvement is possible.
+        """
 
-    The stage searches a maximum-weight augmenting path.
-    If this path is found, it is used to augment the matching,
-    thereby increasing the number of matched edges by 1.
-    If no such path is found, the matching must already be optimal.
+        num_vertex = self.graph.num_vertex
 
-    This function takes time O(n**2).
+        # Assign label S to all unmatched vertices and put them in the queue.
+        for i in range(num_vertex):
+            if self.vertex_mate[i] == -1:
+                self.assign_label_s(i)
 
-    Returns:
-        True if the matching was successfully augmented.
-        False if no further improvement is possible.
-    """
+        # Stop if all vertices are matched.
+        # No further improvement is possible in that case.
+        # This avoids messy calculations of delta steps without any S-vertex.
+        if not self.queue:
+            return False
 
-    num_vertex = matching.graph.num_vertex
+        # Each pass through the following loop is a "substage".
+        # The substage tries to find an augmenting path.
+        # If an augmenting path is found, we augment the matching and end
+        # the stage. Otherwise we update the dual LPP problem and enter the
+        # next substage, or stop if no further improvement is possible.
+        #
+        # This loop runs through at most O(n) iterations per stage.
+        augmenting_path = None
+        while True:
 
-    # Initialize stage data structures.
-    stage_data = _StageData(matching.graph)
-
-    # Assign label S to all unmatched vertices and put them in the queue.
-    for i in range(num_vertex):
-        if matching.vertex_mate[i] == -1:
-            _substage_assign_label_s(matching, stage_data, i)
-
-    # Stop if all vertices are matched.
-    # No further improvement is possible in this case.
-    # This avoids messy calculations of delta steps without any S-vertex.
-    if not stage_data.queue:
-        return False
-
-    # Each pass through the following loop is a "substage".
-    # The substage tries to find an augmenting path. If such a path is found,
-    # we augment the matching and end the stage. Otherwise we update the
-    # dual LPP problem and enter the next substage.
-    #
-    # This loop runs through at most O(n) iterations per stage.
-    augmenting_path = None
-    while True:
-
-        # Scan to expand the alternating trees.
-        # End the stage if an augmenting path is found.
-        augmenting_path = _substage_scan(matching, stage_data)
-        if augmenting_path is not None:
-            break
-
-        # Calculate delta step in the dual LPP problem.
-        (delta_type, delta_2x, delta_edge, delta_blossom
-            ) = _calc_dual_delta(matching, stage_data)
-
-        # Apply the delta step to the dual variables.
-        _apply_delta_step(matching, stage_data, delta_2x)
-
-        if delta_type == 2:
-            # Use the edge from S-vertex to unlabeled vertex that got
-            # unlocked through the delta update.
-            (i, j, _w) = matching.graph.edges[delta_edge]
-            if (stage_data.blossom_label[matching.vertex_blossom[i]] !=
-                    _LABEL_S):
-                (i, j) = (j, i)
-            _substage_assign_label_t(matching, stage_data, i, j)
-
-        elif delta_type == 3:
-            # Use the S-to-S edge that got unlocked through the delta update.
-            # This may reveal an augmenting path.
-            (i, j, _w) = matching.graph.edges[delta_edge]
-            augmenting_path = _substage_add_s_to_s_edge(
-                matching, stage_data, i, j)
+            # Expand alternating trees.
+            # End the stage if an augmenting path is found.
+            augmenting_path = self.substage_scan()
             if augmenting_path is not None:
                 break
 
-        elif delta_type == 4:
-            # Expand the T-blossom that reached dual value 0 through
-            # the delta update.
-            _expand_t_blossom(matching, stage_data, delta_blossom)
+            # Calculate delta step in the dual LPP problem.
+            (delta_type, delta_2x, delta_edge, delta_blossom
+                ) = self.substage_calc_dual_delta()
 
-        else:
-            # No further improvement possible. End the stage.
-            assert delta_type == 1
-            break
+            # Apply the delta step to the dual variables.
+            self.substage_apply_delta_step(delta_2x)
 
-    # Augment the matching if an augmenting path was found.
-    if augmenting_path is not None:
-        _augment_matching(matching, augmenting_path)
+            if delta_type == 2:
+                # Use the edge from S-vertex to unlabeled vertex that got
+                # unlocked through the delta update.
+                (i, j, _w) = self.graph.edges[delta_edge]
+                if self.blossom_label[self.vertex_blossom[i]] != _LABEL_S:
+                    (i, j) = (j, i)
+                self.assign_label_t(i, j)
 
-    # At the end of the stage, expand all blossoms with dual variable zero.
-    # In practice, these are always S-blossoms, since T-blossoms typically
-    # get expanded as soon as their dual variable hits zero.
-    _expand_zero_dual_blossoms(matching)
+            elif delta_type == 3:
+                # Use the S-to-S edge that got unlocked through the delta update.
+                # This may reveal an augmenting path.
+                (i, j, _w) = self.graph.edges[delta_edge]
+                augmenting_path = self.add_s_to_s_edge(i, j)
+                if augmenting_path is not None:
+                    break
 
-    # Return True if the matching was augmented.
-    return (augmenting_path is not None)
+            elif delta_type == 4:
+                # Expand the T-blossom that reached dual value 0 through
+                # the delta update.
+                self.expand_t_blossom(delta_blossom)
+
+            else:
+                # No further improvement possible. End the stage.
+                assert delta_type == 1
+                break
+
+        # Remove all labels, clear queue.
+        self.reset_stage()
+
+        # Augment the matching if an augmenting path was found.
+        if augmenting_path is not None:
+            self.augment_matching(augmenting_path)
+
+        # Expand all blossoms with dual variable zero.
+        # These are typically S-blossoms, since T-blossoms normally
+        # get expanded as soon as their dual variable hits zero.
+        self.expand_zero_dual_blossoms()
+
+        # Return True if the matching was augmented.
+        return (augmenting_path is not None)
 
 
-def _verify_optimum(matching: _PartialMatching) -> None:
+def _verify_optimum(ctx: _MatchingContext) -> None:
     """Verify that the optimum solution has been found.
 
     This function takes time O(m * n).
@@ -1505,15 +1490,15 @@ def _verify_optimum(matching: _PartialMatching) -> None:
         AssertionError: If the solution is not optimal.
     """
 
-    num_vertex = matching.graph.num_vertex
+    num_vertex = ctx.graph.num_vertex
 
-    vertex_mate = matching.vertex_mate
-    vertex_dual_var_2x = matching.dual_var_2x
+    vertex_mate = ctx.vertex_mate
+    vertex_dual_var_2x = ctx.dual_var_2x
 
     # Extract dual values of blossoms
     blossom_dual_var = [
         (blossom.dual_var if blossom is not None else 0)
-        for blossom in matching.blossom]
+        for blossom in ctx.blossom]
 
     # Double-check that each matching edge actually exists in the graph.
     num_matched_vertex = 0
@@ -1522,7 +1507,7 @@ def _verify_optimum(matching: _PartialMatching) -> None:
             num_matched_vertex += 1
 
     num_matched_edge = 0
-    for (i, j, _w) in matching.graph.edges:
+    for (i, j, _w) in ctx.graph.edges:
         if vertex_mate[i] == j:
             num_matched_edge += 1
 
@@ -1535,30 +1520,30 @@ def _verify_optimum(matching: _PartialMatching) -> None:
     # Count the number of vertices in each blossom.
     blossom_nvertex = (2 * num_vertex) * [0]
     for i in range(num_vertex):
-        b = matching.blossom_parent[i]
+        b = ctx.blossom_parent[i]
         while b != -1:
             blossom_nvertex[b] += 1
-            b = matching.blossom_parent[b]
+            b = ctx.blossom_parent[b]
 
     # Calculate slack of each edge.
     # Also count the number of matched edges in each blossom.
     blossom_nmatched = (2 * num_vertex) * [0]
 
-    for (i, j, w) in matching.graph.edges:
+    for (i, j, w) in ctx.graph.edges:
 
         # List blossoms that contain vertex "i".
         iblossoms = []
-        bi = matching.blossom_parent[i]
+        bi = ctx.blossom_parent[i]
         while bi != -1:
             iblossoms.append(bi)
-            bi = matching.blossom_parent[bi]
+            bi = ctx.blossom_parent[bi]
 
         # List blossoms that contain vertex "j".
         jblossoms = []
-        bj = matching.blossom_parent[j]
+        bj = ctx.blossom_parent[j]
         while bj != -1:
             jblossoms.append(bj)
-            bj = matching.blossom_parent[bj]
+            bj = ctx.blossom_parent[bj]
 
         # List blossoms that contain the edge (i, j).
         edge_blossoms = []
