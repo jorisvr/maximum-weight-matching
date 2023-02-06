@@ -51,11 +51,8 @@ def maximum_weight_matching(
     _check_input_types(edges)
     _check_input_graph(edges)
 
-    # Eliminate edges with negative weight.
-    # This does not change the solution but prevents complications
-    # in the algorithm.
-    if any(e[2] < 0 for e in edges):
-        edges = [e for e in edges if e[2] >= 0]
+    # Remove edges with negative weight.
+    edges = _remove_negative_weight_edges(edges)
 
     # Special case for empty graphs.
     if not edges:
@@ -252,6 +249,20 @@ def _check_input_graph(edges: list[tuple[int, int, int|float]]) -> None:
             raise ValueError(f"Duplicate edge {edge_endpoints[i]}")
 
 
+def _remove_negative_weight_edges(
+        edges: list[tuple[int, int, int|float]]
+        ) -> list[tuple[int, int, int|float]]:
+    """Remove edges with negative weight.
+
+    This does not change the solution of the maximum-weight matching problem,
+    but prevents complications in the algorithm.
+    """
+    if any(e[2] < 0 for e in edges):
+        return [e for e in edges if e[2] >= 0]
+    else:
+        return edges
+
+
 class _GraphInfo:
     """Representation of the input graph.
 
@@ -300,60 +311,6 @@ class _GraphInfo:
         # In this case we can avoid floating point computations entirely.
         self.integer_weights: bool = all(isinstance(w, int)
                                          for (_i, _j, w) in edges)
-
-
-# TODO:
-#   When this fucking thing is finished and working, reconsider the data structures:
-#    - Is it really so important to separate StageData from PartialMatching ?
-#    - Especially since S-blossom least-slack tracking might be better placed inside _Blossom.
-#    - Is there a way to shortcut the indexing from blossom index to _Blossom via blossom[b] ?
-#    - Consider for example that the "blossombase" array in the old code was actually pretty nice
-#      since it generalizes over trivial and non-trivial blossoms.
-#    - Maybe we should EITHER go for ugly and array-heavy like the previous code,
-#      OR nice and object-oriented, but then also make objects for single vertices.
-#      Also try to think ahead to how this could be done in C++.
-#    - Is there a way to reduce allocations of tuples ?
-#      (First profile if it saves any time, otherwise don't even bother.)
-#
-#    - Maybe nice to abstract away the management of least-slack edges to separate classes.
-#
-# NOTE: It is possible for a blossom to have an unmatched base vertex.
-#       Top-level blossoms with unmatched based vertex are marked S-blossom at the start of a stage.
-#       Such blossoms can appear as the endpoints of an augmenting path.
-#
-# NOTE: We use least-slack edge tracking between S-vertex and T-vertex
-#       to re-discover edges that can be used to relabel an unlabeled
-#       blossom after T-blossom expansion.
-#       This is a pretty good trick. Galil does it too. I probably did
-#       not understand this when I wrote the old code and figured out
-#       a different approach.
-#
-# Proof that S-to-S edges have even slack when working with integer weights:
-# Edge slack is even iff indicent vertex duals are both odd or both even.
-# Unmatched vertices are always S vertices, therefore either all unmatched vertices are odd or all unmatched vertices are even.
-# Within an alternating tree, all edges have zero slack, therefore either all vertices in the tree are even or all are odd.
-# Alternating trees are rooted in unmatched vertices, therefore either all vertices in all alternating trees are even or all are odd.
-# Therefore all labeled vertices are even or all labeled vertices are odd.
-# Therefore S-to-S edges have even slack.
-#
-# Proof that dual variables will always be in range (0 .. max_edge_weight):
-#  - Assuming normal maximum-weight matching, without maximum-cardinality tricks.
-#  - Assuming the original formulation of dual variables and edge weights;
-#    i.e. in our implementation the range would be 0 .. 2 * max_edge_weight
-#    due to implicit multiplication by 2.
-#  - Initially, all dual variables are 0.5 * max_edge_weight
-#  - While the algorithm runs, there is at least one unmatched vertex.
-#  - Any unmatched vertex has been unmatched since the start of the algorithm
-#    (since a matched vertex can never become unmatched).
-#  - All unmatched vertices are immediately labeled as S-vertex.
-#  - Therefore all delta updates have decreased the dual variables of
-#    all unmatched edges.
-#  - But the dual variable of an S-vertex can never become negative
-#    (due to the delta1 rule).
-#  - Therefore the sum of delta updates can not exceed 0.5 * max_edge_weight.
-#  - Therefore no T-vertex can get its dual variable to exceed max_edge_weight.
-#  - And no S-blossom can get its dual variable to exceed max_edge_weight.
-#
 
 
 class _Blossom:
