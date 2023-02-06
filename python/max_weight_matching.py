@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import sys
 import math
-from typing import cast, NamedTuple, Optional
+from typing import NamedTuple, Optional
 
 
 def maximum_weight_matching(
@@ -86,16 +86,7 @@ def maximum_weight_matching(
     # Verification is a redundant step; if the matching algorithm is correct,
     # verification will always pass.
     if graph.integer_weights:
-# TODO : Maybe interesting to redesign blossom/dual data structures such
-#        that this info for verification is easier to extract.
-        blossom_dual_var = [
-            (2 * blossom.half_dual_var if blossom is not None else 0)
-            for blossom in matching.blossom]
-        _verify_optimum(graph,
-                        pairs,
-                        cast(list[int], matching.dual_var),
-                        matching.blossom_parent,
-                        cast(list[int], blossom_dual_var))
+        _verify_optimum(matching)
 
     return pairs
 
@@ -428,9 +419,9 @@ class _Blossom:
 
         # Every blossom has a variable in the dual LPP.
         #
-        # "half_dual_var" is half of the current value of the dual variable.
+        # "dual_var" is the current value of the dual variable.
         # New blossoms start with dual variable 0.
-        self.half_dual_var: int|float = 0
+        self.dual_var: int|float = 0
 
 
 class _PartialMatching:
@@ -497,26 +488,26 @@ class _PartialMatching:
 
         # Every vertex has a variable in the dual LPP.
         #
-        # "dual_var[v]" is the current value of the dual variable of "v".
+        # "dual_var_2x[v]" is 2 times the dual variable of "v".
+        # Multiplication by 2 ensures that the values are integers
+        # if all edge weights are integers.
         #
         # Vertex duals are initialized to half the maximum edge weight.
-        # Note that we multiply all edge weights by 2, and half of 2 times
-        # the maximum edge weight is simply the maximum edge weight.
         max_weight = max(wt for (_i, _j, wt) in graph.edges)
-        self.dual_var: list[int|float] = graph.num_vertex * [max_weight]
+        self.dual_var_2x: list[int|float] = graph.num_vertex * [max_weight]
 
-    def edge_slack(self, e: int) -> int|float:
-        """Return the slack of the edge with index "e".
+    def edge_slack_2x(self, e: int) -> int|float:
+        """Return 2 times the slack of the edge with index "e".
 
         The result is only valid for edges that are not between vertices
         that belong to the same top-level blossom.
 
-        Slack values are integers if all edge weights are even integers.
-        For this reason, we multiply all edge weights by 2.
+        Multiplication by 2 ensures that the return value is an integer
+        if all edge weights are integers.
         """
         (i, j, wt) = self.graph.edges[e]
         assert self.vertex_blossom[i] != self.vertex_blossom[j]
-        return self.dual_var[i] + self.dual_var[j] - 2 * wt
+        return self.dual_var_2x[i] + self.dual_var_2x[j] - 2 * wt
 
     def get_blossom(self, b: int) -> _Blossom:
         """Return the Blossom instance for blossom index "b"."""
@@ -818,7 +809,7 @@ def _make_blossom(
                 continue
 
             # Keep only the least-slack edge to "vblossom".
-            slack = matching.edge_slack(e)
+            slack = matching.edge_slack_2x(e)
             if ((best_edge_to_blossom[vblossom] == -1)
                     or (slack < best_slack_to_blossom[vblossom])):
                 best_edge_to_blossom[vblossom] = e
@@ -834,7 +825,7 @@ def _make_blossom(
     best_edge = -1
     best_slack: int|float = 0
     for e in best_edge_set:
-        slack = matching.edge_slack(e)
+        slack = matching.edge_slack_2x(e)
         if (best_edge == -1) or (slack < best_slack):
             best_edge = e
             best_slack = slack
@@ -1007,7 +998,7 @@ def _substage_scan(
 
             # Check whether this edge is tight (has zero slack).
             # Only tight edges may be part of an alternating tree.
-            slack = matching.edge_slack(e)
+            slack = matching.edge_slack_2x(e)
             if slack <= 0:
                 if wlabel == _LABEL_NONE:
                     # Assign label T to the blossom that contains vertex "w".
@@ -1024,7 +1015,8 @@ def _substage_scan(
             elif wlabel == _LABEL_S:
                 # Update tracking of least-slack edges between S-blossoms.
                 best_edge = stage_data.blossom_best_edge[vblossom]
-                if best_edge < 0 or slack < matching.edge_slack(best_edge):
+                if ((best_edge < 0)
+                        or (slack < matching.edge_slack_2x(best_edge))):
                     stage_data.blossom_best_edge[vblossom] = e
 
                 # Update the list of least-slack edges to S-blossoms for
@@ -1043,7 +1035,7 @@ def _substage_scan(
                 # later. At that point we will need a zero-slack edge to
                 # relabel vertex "w".
                 best_edge = stage_data.vertex_best_edge[w]
-                if best_edge < 0 or slack < matching.edge_slack(best_edge):
+                if best_edge < 0 or slack < matching.edge_slack_2x(best_edge):
                     stage_data.vertex_best_edge[w] = e
 
     # No further S vertices to scan, and no augmenting path found.
@@ -1192,7 +1184,7 @@ def _expand_zero_dual_blossoms(matching: _PartialMatching) -> None:
             # the most recent delta step. Those blossoms have dual variable
             # _exactly_ zero. So this comparison is reliable, even in case
             # of floating point edge weights.
-            if blossom.half_dual_var == 0:
+            if blossom.dual_var == 0:
                 stack.append(b)
 
     # Use an explicit stack to avoid deep recursion.
@@ -1217,7 +1209,7 @@ def _expand_zero_dual_blossoms(matching: _PartialMatching) -> None:
             else:
                 # Non-trivial sub-blossom.
                 # If its dual variable is zero, we expand it recursively.
-                if matching.get_blossom(sub).half_dual_var == 0:
+                if matching.get_blossom(sub).dual_var == 0:
                     stack.append(sub)
                 else:
                     # This sub-blossom will not be expanded.
@@ -1347,8 +1339,9 @@ def _calc_dual_delta(
     and the type of delta which obtain the minimum, and the edge or blossom
     that produces the minimum delta, if applicable.
 
-    The returned delta value is an integer if all edge weights are even
-    integers.
+    The returned value is 2 times the actual delta value.
+    Multiplication by 2 ensures that the result is an integer if all edge
+    weights are integers.
 
     This function assumes that there is at least one S-vertex.
     This function takes time O(n).
@@ -1363,9 +1356,9 @@ def _calc_dual_delta(
 
     # Compute delta1: minimum dual variable of any S-vertex.
     delta_type = 1
-    delta = min(matching.dual_var[v]
-                for v in range(num_vertex)
-                if stage_data.blossom_label[matching.vertex_blossom[v]])
+    delta_2x = min(matching.dual_var_2x[v]
+                   for v in range(num_vertex)
+                   if stage_data.blossom_label[matching.vertex_blossom[v]])
 
     # Compute delta2: minimum slack of any edge between an S-vertex and
     # an unlabeled vertex.
@@ -1374,10 +1367,10 @@ def _calc_dual_delta(
         if stage_data.blossom_label[vb] == _LABEL_NONE:
             e = stage_data.vertex_best_edge[v]
             if e != -1:
-                slack = matching.edge_slack(e)
-                if slack <= delta:
+                slack = matching.edge_slack_2x(e)
+                if slack <= delta_2x:
                     delta_type = 2
-                    delta = slack
+                    delta_2x = slack
                     delta_edge = e
 
     # Compute delta3: half minimum slack of any edge between two top-level
@@ -1387,7 +1380,7 @@ def _calc_dual_delta(
                 and matching.blossom_parent[b] == -1):
             e = stage_data.blossom_best_edge[b]
             if e != -1:
-                slack = matching.edge_slack(e)
+                slack = matching.edge_slack_2x(e)
                 if matching.graph.integer_weights:
                     # If all edge weights are even integers, the slack
                     # of any edge between two S blossoms is also an even
@@ -1396,28 +1389,28 @@ def _calc_dual_delta(
                     slack = slack // 2
                 else:
                     slack = slack / 2
-                if slack <= delta:
+                if slack <= delta_2x:
                     delta_type = 3
-                    delta = slack
+                    delta_2x = slack
                     delta_edge = e
 
     # Compute delta4: half minimum dual variable of any T-blossom.
     for b in range(num_vertex, 2 * num_vertex):
         if (stage_data.blossom_label[b] == _LABEL_T
                 and matching.blossom_parent[b] == -1):
-            slack = matching.get_blossom(b).half_dual_var
-            if slack < delta:
+            slack = matching.get_blossom(b).dual_var
+            if slack < delta_2x:
                 delta_type = 4
-                delta = slack
+                delta_2x = slack
                 delta_blossom = b
 
-    return (delta_type, delta, delta_edge, delta_blossom)
+    return (delta_type, delta_2x, delta_edge, delta_blossom)
 
 
 def _apply_delta_step(
         matching: _PartialMatching,
         stage_data: _StageData,
-        delta: int|float
+        delta_2x: int|float
         ) -> None:
     """Apply a delta step to the dual LPP variables."""
 
@@ -1428,10 +1421,10 @@ def _apply_delta_step(
         vlabel = stage_data.blossom_label[matching.vertex_blossom[v]]
         if vlabel == _LABEL_S:
             # S-vertex: subtract delta from dual variable.
-            matching.dual_var[v] -= delta
+            matching.dual_var_2x[v] -= delta_2x
         elif vlabel == _LABEL_T:
             # T-vertex: add delta to dual variable.
-            matching.dual_var[v] += delta
+            matching.dual_var_2x[v] += delta_2x
 
     # Apply delta to dual variables of top-level non-trivial blossoms.
     for b in range(num_vertex, 2 * num_vertex):
@@ -1439,10 +1432,10 @@ def _apply_delta_step(
             blabel = stage_data.blossom_label[b]
             if blabel == _LABEL_S:
                 # S-blossom: add 2*delta to dual variable.
-                matching.get_blossom(b).half_dual_var += delta
+                matching.get_blossom(b).dual_var += delta_2x
             elif blabel == _LABEL_T:
                 # T-blossom: subtract 2*delta from dual variable.
-                matching.get_blossom(b).half_dual_var -= delta
+                matching.get_blossom(b).dual_var -= delta_2x
 
 
 def _run_stage(matching: _PartialMatching) -> bool:
@@ -1492,11 +1485,11 @@ def _run_stage(matching: _PartialMatching) -> bool:
             break
 
         # Calculate delta step in the dual LPP problem.
-        (delta_type, delta, delta_edge, delta_blossom
+        (delta_type, delta_2x, delta_edge, delta_blossom
             ) = _calc_dual_delta(matching, stage_data)
 
         # Apply the delta step to the dual variables.
-        _apply_delta_step(matching, stage_data, delta)
+        _apply_delta_step(matching, stage_data, delta_2x)
 
         if delta_type == 2:
             # Use the edge from S-vertex to unlabeled vertex that got
@@ -1539,68 +1532,69 @@ def _run_stage(matching: _PartialMatching) -> bool:
     return (augmenting_path is not None)
 
 
-def _verify_optimum(
-        graph: _GraphInfo,
-        pairs: list[tuple[int, int]],
-        vertex_dual_var: list[int],
-        blossom_parent: list[int],
-        blossom_dual_var: list[int]
-        ) -> None:
+def _verify_optimum(matching: _PartialMatching) -> None:
     """Verify that the optimum solution has been found.
 
-    This function takes time O(m*n).
+    This function takes time O(m * n).
 
     Raises:
         AssertionError: If the solution is not optimal.
     """
 
-    # Find mate of each matched vertex.
-    # Double-check that each vertex is matched to at most one other.
-    vertex_mate = (graph.num_vertex) * [-1]
-    for (i, j) in pairs:
-        assert vertex_mate[i] == -1
-        assert vertex_mate[j] == -1
-        vertex_mate[i] = j
-        vertex_mate[j] = i
+    num_vertex = matching.graph.num_vertex
+
+    vertex_mate = matching.vertex_mate
+    vertex_dual_var_2x = matching.dual_var_2x
+
+    # Extract dual values of blossoms
+    blossom_dual_var = [
+        (blossom.dual_var if blossom is not None else 0)
+        for blossom in matching.blossom]
 
     # Double-check that each matching edge actually exists in the graph.
-    nmatched = 0
-    for (i, j, _wt) in graph.edges:
+    num_matched_vertex = 0
+    for v in range(num_vertex):
+        if vertex_mate[v] != -1:
+            num_matched_vertex += 1
+
+    num_matched_edge = 0
+    for (i, j, _wt) in matching.graph.edges:
         if vertex_mate[i] == j:
-            nmatched += 1
-    assert len(pairs) == nmatched
+            num_matched_edge += 1
+
+    assert num_matched_vertex == 2 * num_matched_edge
 
     # Check that all dual variables are non-negative.
-    assert min(vertex_dual_var) >= 0
+    assert min(vertex_dual_var_2x) >= 0
     assert min(blossom_dual_var) >= 0
 
     # Count the number of vertices in each blossom.
-    blossom_nvertex = (2 * graph.num_vertex) * [0]
-    for v in range(graph.num_vertex):
-        b = blossom_parent[v]
+    blossom_nvertex = (2 * num_vertex) * [0]
+    for v in range(num_vertex):
+        b = matching.blossom_parent[v]
         while b != -1:
             blossom_nvertex[b] += 1
-            b = blossom_parent[b]
+            b = matching.blossom_parent[b]
 
     # Calculate slack of each edge.
     # Also count the number of matched edges in each blossom.
-    blossom_nmatched = (2 * graph.num_vertex) * [0]
+    blossom_nmatched = (2 * num_vertex) * [0]
 
-    for (i, j, wt) in graph.edges:
+    for (i, j, wt) in matching.graph.edges:
 
         # List blossoms that contain vertex "i".
         iblossoms = []
-        bi = blossom_parent[i]
+        bi = matching.blossom_parent[i]
         while bi != -1:
             iblossoms.append(bi)
-            bi = blossom_parent[bi]
+            bi = matching.blossom_parent[bi]
 
         # List blossoms that contain vertex "j".
         jblossoms = []
-        bj = blossom_parent[j]
+        bj = matching.blossom_parent[j]
         while bj != -1:
             jblossoms.append(bj)
-            bj = blossom_parent[bj]
+            bj = matching.blossom_parent[bj]
 
         # List blossoms that contain the edge (i, j).
         edge_blossoms = []
@@ -1613,9 +1607,9 @@ def _verify_optimum(
         #   dual[i] + dual[j] - weight
         #     + sum(dual[b] for blossoms "b" containing the edge)
         #
-        # Note we always multiply edge weights by 2.
-        slack = vertex_dual_var[i] + vertex_dual_var[j] - 2 * wt
-        slack += sum(blossom_dual_var[b] for b in edge_blossoms)
+        # Multiply weights by 2 to ensure integer values.
+        slack = vertex_dual_var_2x[i] + vertex_dual_var_2x[j] - 2 * wt
+        slack += 2 * sum(blossom_dual_var[b] for b in edge_blossoms)
 
         # Check that all edges have non-negative slack.
         assert slack >= 0
@@ -1630,14 +1624,14 @@ def _verify_optimum(
                 blossom_nmatched[b] += 1
 
     # Check that all unmatched vertices have zero dual.
-    for v in range(graph.num_vertex):
+    for v in range(num_vertex):
         if vertex_mate[v] == -1:
-            assert vertex_dual_var[v] == 0
+            assert vertex_dual_var_2x[v] == 0
 
     # Check that all blossoms with positive dual are "full".
     # A blossom is full if all except one of its vertices are matched
     # to another vertex in the same blossom.
-    for b in range(graph.num_vertex, 2 * graph.num_vertex):
+    for b in range(num_vertex, 2 * num_vertex):
         if blossom_dual_var[b] > 0:
             assert blossom_nvertex[b] == 2 * blossom_nmatched[b] + 1
 
