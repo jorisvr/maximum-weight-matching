@@ -753,11 +753,12 @@ def _make_blossom(
 
     # Former T-vertices which are part of this blossom have now become
     # S-vertices. Add them to the queue.
-    for sub in subblossoms[1::2]:
-        if sub < num_vertex:
-            stage_data.queue.append(sub)
-        else:
-            stage_data.queue.extend(matching.blossom_vertices(sub))
+    for sub in subblossoms:
+        if stage_data.blossom_label[sub] == _LABEL_T:
+            if sub < num_vertex:
+                stage_data.queue.append(sub)
+            else:
+                stage_data.queue.extend(matching.blossom_vertices(sub))
 
     # Calculate the set of least-slack edges to other S-blossoms.
     # We basically merge the edge lists from all sub-blossoms, but reject
@@ -780,7 +781,9 @@ def _make_blossom(
         0 for b in range(2 * num_vertex)]
 
     # Add the least-slack edges of every S-sub-blossom.
-    for sub in subblossoms[0::2]:
+    for sub in subblossoms:
+        if stage_data.blossom_label[sub] != _LABEL_S:
+            continue
         if sub < num_vertex:
             # Trivial blossoms don't have a list of least-slack edges,
             # so we just look at all adjacent edges. This happens at most
@@ -1072,7 +1075,7 @@ def _find_path_through_blossom(
             #                           ^^^                      ^^^
             #                               <-------------------
             #
-            # We must flip edges from (v,w) to (w,v) to make them fit
+            # We flip edges from (v,w) to (w,v) to make them fit
             # in the path from "s" to base.
             edges.append(blossom.edges[i-1][::-1])
             nodes.append(blossom.subblossoms[i-1])
