@@ -28,9 +28,7 @@ def maximum_weight_matching(
     Isolated vertices (not incident to any edge) are allowed, but not
     recommended since such vertices consume time and memory but have
     no effect on the maximum-weight matching.
-
-    Negative edge weights are allowed, but not recommended since such edges
-    consume time and memory but have no effect on the maximum-weight matching.
+    Edges with negative weight are ignored.
 
     This function takes time O(n**3), where "n" is the number of vertices.
     This function uses O(n + m) memory, where "m" is the number of edges.
@@ -52,6 +50,12 @@ def maximum_weight_matching(
     # Check that the input meets all constraints.
     _check_input_types(edges)
     _check_input_graph(edges)
+
+    # Eliminate edges with negative weight.
+    # This does not change the solution but prevents complications
+    # in the algorithm.
+    if any(e[2] < 0 for e in edges):
+        edges = [e for e in edges if e[2] >= 0]
 
     # Special case for empty graphs.
     if not edges:
