@@ -395,6 +395,292 @@ class _AlternatingPath(NamedTuple):
     edges: list[tuple[int, int]]
 
 
+class _VertexBestEdgeTracking:
+    """Keep track of the least-slack edge from an unlabeled or T-labeled
+    vertex to any S-vertex.
+
+    The least-slack edge between any S-vertex and unlabeled vertex is needed
+    to calculate a delta step in the matching algorithm.
+
+    For each unlabeled vertex and each T-vertex, this class keeps track
+    of the least-slack edge to any S-vertex. Tracking for unlabeled vertices
+    is done to provide the least-slack edge for the delta step.
+    Tracking for T-vertices is done because such vertices can turn into
+    unlabeled vertices if they are part of a T-blossom that gets expanded.
+
+    Note: For a given unlabeled vertex or T-vertex, the identity of the
+    least-slack edge to any S-blossom remains unchanged during a delta step.
+    Although the delta step changes edge slack, it changes the slack of
+    every edge to an S-vertex by the same amount. Therefore the edge that has
+    least-slack before the delta step, will still have least-slack after
+    the delta step.
+    """
+
+    def __init__(self, num_vertex: int) -> None:
+        """Initialize least-slack edge tracking."""
+
+        self.num_vertex = num_vertex
+
+        # "vertex_best_edge[x]" is the edge index of the least-slack edge
+        # between "x" and any S-vertex, or -1 if no such edge has been found.
+        self.vertex_best_edge: list[int] = num_vertex * [-1]
+
+    def reset(self) -> None:
+        """Remove all tracked edges.
+
+        This function takes time O(n).
+        """
+        for x in range(self.num_vertex):
+            self.vertex_best_edge[x] = -1
+
+    def add_edge(self, ctx: _MatchingContext, y: int, e: int) -> None:
+        """Add the edge with index "e" from an S-vertex to unlabeled vertex
+        or T-vertex "y".
+
+        This function takes time O(1) per call.
+        This function takes total time O(m) per stage.
+        """
+        best_edge = self.vertex_best_edge[y]
+        if best_edge == -1:
+            self.vertex_best_edge[y] = e
+        else:
+            best_slack = ctx.edge_slack_2x(best_edge)
+            slack = ctx.edge_slack_2x(e)
+            if slack < best_slack:
+                self.vertex_best_edge[y] = e
+
+    def get_least_slack_edge(
+            self,
+            ctx: _MatchingContext
+            ) -> tuple[int, int|float]:
+        """Return the index and slack of the least-slack edge between
+        any S-vertex and unlabeled vertex.
+
+        This function takes time O(n) per call.
+        This function takes total time O(n**2) per stage.
+
+        Returns:
+            Tuple (edge_index, slack_2x) if there is a least-slack edge,
+            or (-1, 0) if there is no suitable edge.
+        """
+        best_index = -1
+        best_slack: int|float = 0
+
+        for x in range(self.num_vertex):
+            bx = ctx.vertex_blossom[x]
+            if ctx.blossom_label[bx] == _LABEL_NONE:
+                e = self.vertex_best_edge[x]
+                if e != -1:
+                    slack = ctx.edge_slack_2x(e)
+                    if (best_index == -1) or (slack < best_slack):
+                        best_index = e
+                        best_slack = slack
+
+        return (best_index, best_slack)
+
+
+class _BlossomBestEdgeTracking:
+    """Keep track of the least-slack edge between top-level S-blossoms.
+
+    The least-slack edge between any two top-level S-blossoms is needed
+    to calculate a delta step in the matching algorithm.
+
+    For each top-level S-blossom, this class keeps track of the least-slack
+    edge to any S-vertex not in the same blossom.
+
+    Furthermore, for each top-level S-blossom, this class keeps a list of
+    least-slack edges to other top-level S-blossoms. For any pair of top-level
+    S-blossoms, the least-slack edge between them is contained in the edge
+    list of at least one of the blossoms. An edge list may contain multiple
+    edges to the same S-blossom. Such redundant edges are pruned during
+    blossom formation to limit the number of tracked edges.
+
+    Note: For a given S-blossom, the identity of the least-slack edge to other
+    S-blossoms remains unchanged during a delta step. Although the delta step
+    changes edge slack, it changes the slack of every edge between S-blossoms
+    by the same amount. Therefore the edge that has least-slack before the
+    delta step, will still have least-slack after the delta step.
+    """
+
+    def __init__(self, num_vertex: int) -> None:
+        """Initialize least-slack edge tracking."""
+
+        self.num_vertex = num_vertex
+
+        # For non-trivial top-level S-blossom "b",
+        # "blossom_best_edge_set[b]" is a list of edges between blossom "b"
+        # and other S-blossoms.
+        self.blossom_best_edge_set: list[Optional[list[int]]] = [
+            None for b in range(2 * num_vertex)]
+
+        # For every top-level S-blossom "b",
+        # "blossom_best_edge[b]" is the edge index of the least-slack edge
+        # to a different S-blossom, or -1 if no such edge has been found.
+        self.blossom_best_edge: list[int] = (2 * num_vertex) * [-1]
+
+    def reset(self) -> None:
+        """Remove all tracked edges.
+
+        This function takes time O(n).
+        """
+        for b in range(2 * self.num_vertex):
+            self.blossom_best_edge_set[b] = None
+            self.blossom_best_edge[b] = -1
+
+    def new_blossom(self, b: int) -> None:
+        """Start tracking edges for the new blossom "b"."""
+        assert self.blossom_best_edge_set[b] is None
+        self.blossom_best_edge_set[b] = []
+
+    def add_edge(self, ctx: _MatchingContext, b: int, e: int) -> None:
+        """Add the edge with index "e" from S-blossom "b" to another
+        S-blossom.
+
+        This function takes time O(1) per call.
+        This function takes total time O(m) per stage.
+        """
+        # Update the least-slack edge from blossom "b" to any other
+        # S-blossom.
+        best_edge = self.blossom_best_edge[b]
+        if best_edge == -1:
+            self.blossom_best_edge[b] = e
+        else:
+            best_slack = ctx.edge_slack_2x(best_edge)
+            slack = ctx.edge_slack_2x(e)
+            if slack < best_slack:
+                self.blossom_best_edge[b] = e
+
+        # Regardless of whether this edge is currently the least-slack
+        # edge from blossom "b" to any other S-blossom, this edge may
+        # later become the least-slack edge if other edges become
+        # unavailable during a merge of S-blossoms.
+        #
+        # We therefore add the edge to a list of potential future least-slack
+        # edges for blossom "b". We do this only for non-trivial blossoms.
+        if b >= self.num_vertex:
+            best_edge_set = self.blossom_best_edge_set[b]
+            assert best_edge_set is not None
+            best_edge_set.append(e)
+
+    def merge_blossoms(
+            self,
+            ctx: _MatchingContext,
+            b: int,
+            subblossoms: list[int]
+            ) -> None:
+        """Merge one or more S-sub-blossoms to form a new S-blossom "b".
+
+        This function takes time O(n) per call.
+        This function takes total time O(n**2) per stage.
+        """
+        num_vertex = self.num_vertex
+
+        # Calculate the set of least-slack edges to other S-blossoms.
+        # We basically merge the edge lists from all sub-blossoms, but reject
+        # edges that are internal to this blossom, and trim the set such that
+        # there is at most one edge to each external S-blossom.
+        #
+        # Sub-blossoms that were formerly labeled T can be ignored; their
+        # vertices are in the queue and will discover neighbouring S-blossoms
+        # via the edge scan process.
+        #
+        # Build a temporary array holding the least-slack edge index to
+        # each top-level S-blossom.
+        best_edge_to_blossom: list[int] = (2 * num_vertex) * [-1]
+        zero_slack: int|float = 0
+        best_slack_to_blossom: list[int|float] = (
+            (2 * num_vertex) * [zero_slack])
+
+        # And find the overall least-slack edge to any other S-blossom.
+        best_edge = -1
+        best_slack: int|float = 0
+
+        # Add the least-slack edges of every S-sub-blossom.
+        for sub in subblossoms:
+            if sub < num_vertex:
+                # Trivial blossoms don't have a list of least-slack edges,
+                # so we just look at all adjacent edges. This happens at most
+                # once per vertex per stage.
+                # It adds up to O(m) time per stage.
+                sub_edge_set = ctx.graph.adjacent_edges[sub]
+            else:
+                # Use the edge list of the sub-blossom.
+                sub_edge_set_opt = self.blossom_best_edge_set[sub]
+                assert sub_edge_set_opt is not None
+                sub_edge_set = sub_edge_set_opt
+                # Delete the edge list from the sub-blossom.
+                self.blossom_best_edge_set[sub] = None
+
+            # Add edges to the temporary array.
+            for e in sub_edge_set:
+                (x, y, _w) = ctx.graph.edges[e]
+                bx = ctx.vertex_blossom[x]
+                by = ctx.vertex_blossom[y]
+                assert (bx == b) or (by == b)
+
+                # Reject internal edges in this blossom.
+                if bx == by:
+                    continue
+
+                # Set bx = other blossom which is reachable through this edge.
+# TODO : generalize over this pattern
+                bx = by if (bx == b) else bx
+
+                # Reject edges that don't link to an S-blossom.
+                if ctx.blossom_label[bx] != _LABEL_S:
+                    continue
+
+                # Keep only the least-slack edge to "bx".
+                slack = ctx.edge_slack_2x(e)
+                if ((best_edge_to_blossom[bx] == -1)
+                        or (slack < best_slack_to_blossom[bx])):
+                    best_edge_to_blossom[bx] = e
+                    best_slack_to_blossom[bx] = slack
+
+                # Update the overall least-slack edge to any S-blossom.
+                if (best_edge == -1) or (slack < best_slack):
+                    best_edge = e
+                    best_slack = slack
+
+        # Extract a compact list of least-slack edge indices.
+        # We can not keep the temporary array because that would blow up
+        # memory use to O(n**2).
+        best_edge_set = [e for e in best_edge_to_blossom if e != -1]
+        self.blossom_best_edge_set[b] = best_edge_set
+
+        # Keep the overall least-slack edge.
+        self.blossom_best_edge[b] = best_edge
+
+    def get_least_slack_edge(
+            self,
+            ctx: _MatchingContext
+            ) -> tuple[int, int|float]:
+        """Return the index and slack of the least-slack edge between
+        any pair of top-level S-blossoms.
+
+        This function takes time O(n) per call.
+        This function takes total time O(n**2) per stage.
+
+        Returns:
+            Tuple (edge_index, slack_2x) if there is a least-slack edge,
+            or (-1, 0) if there is no suitable edge.
+        """
+        best_index = -1
+        best_slack: int|float = 0
+
+        for b in range(2 * self.num_vertex):
+            if ((ctx.blossom_label[b] == _LABEL_S)
+                    and (ctx.blossom_parent[b] == -1)):
+                e = self.blossom_best_edge[b]
+                if e != -1:
+                    slack = ctx.edge_slack_2x(e)
+                    if (best_index == -1) or (slack < best_slack):
+                        best_index = e
+                        best_slack = slack
+
+        return (best_index, best_slack)
+
+
 class _MatchingContext:
     """Holds all data used by the matching algorithm.
 
@@ -492,20 +778,11 @@ class _MatchingContext:
         self.blossom_link: list[Optional[tuple[int, int]]] = [
             None for b in range(2 * num_vertex)]
 
-        # "vertex_best_edge[x]" is the edge index of the least-slack edge
-        # between "x" and any S-vertex, or -1 if no such edge has been found.
-        self.vertex_best_edge: list[int] = num_vertex * [-1]
+        # Track least-slack edges between S-vertex and unlabeled vertex.
+        self.vertex_best_edges = _VertexBestEdgeTracking(num_vertex)
 
-        # For non-trivial top-level S-blossom "b",
-        # "blossom_best_edge_set[b]" is a list of edges between blossom "b"
-        # and other S-blossoms.
-        self.blossom_best_edge_set: list[Optional[list[int]]] = [
-            None for b in range(2 * num_vertex)]
-
-        # For every top-level S-blossom "b",
-        # "blossom_best_edge[b]" is the edge index of the least-slack edge
-        # to a different S-blossom, or -1 if no such edge has been found.
-        self.blossom_best_edge: list[int] = (2 * num_vertex) * [-1]
+        # Track least-slack edges between S-blossoms.
+        self.blossom_best_edges = _BlossomBestEdgeTracking(num_vertex)
 
         # A list of S-vertices to be scanned.
         # We call it a queue, but it is actually a stack.
@@ -569,12 +846,8 @@ class _MatchingContext:
         self.queue.clear()
 
         # Reset least-slack edge tracking.
-        for x in range(num_vertex):
-            self.vertex_best_edge[x] = -1
-
-        for b in range(2 * num_vertex):
-            self.blossom_best_edge_set[b] = None
-            self.blossom_best_edge[b] = -1
+        self.vertex_best_edges.reset()
+        self.blossom_best_edges.reset()
 
     def trace_alternating_paths(self, x: int, y: int) -> _AlternatingPath:
         """Trace back through the alternating trees from vertices "x" and "y".
@@ -666,7 +939,8 @@ class _MatchingContext:
         Assign label S to the new blossom.
         Relabel all T-sub-blossoms as S and add their vertices to the queue.
 
-        This function takes time O(n).
+        This function takes time O(n) per call.
+        This function takes total time O(n**2) per stage.
         """
 
         num_vertex = self.graph.num_vertex
@@ -717,7 +991,7 @@ class _MatchingContext:
         self.blossom_label[b] = _LABEL_S
         self.blossom_link[b] = self.blossom_link[base_blossom]
 
-        # Former T-vertices which are part of this blossom have now become
+        # Former T-vertices which are part of this blossom now become
         # S-vertices. Add them to the queue.
         for sub in subblossoms:
             if self.blossom_label[sub] == _LABEL_T:
@@ -726,85 +1000,11 @@ class _MatchingContext:
                 else:
                     self.queue.extend(self.blossom_vertices(sub))
 
-        # Calculate the set of least-slack edges to other S-blossoms.
-        # We basically merge the edge lists from all sub-blossoms, but reject
-        # edges that are internal to this blossom, and trim the set such that
-        # there is at most one edge to each external S-blossom.
-        #
-        # Sub-blossoms that were formerly labeled T can be ignored; their
-        # vertices are in the queue and will discover neighbouring S-blossoms
-        # via the edge scan process.
-        #
-        # Build a temporary array holding the least-slack edge index to
-        # each top-level S-blossom.
-        #
-        # NOTE: This step takes O(n) time per blossom formation, and adds up
-        #       to O(n**2) total time per stage.
-        #       For sparse graphs, this could be improved by tracking
-        #       least-slack edges in a priority queue.
-        best_edge_to_blossom: list[int] = (2 * num_vertex) * [-1]
-        zero_slack: int|float = 0
-        best_slack_to_blossom: list[int|float] = (
-            (2 * num_vertex) * [zero_slack])
-
-        # Add the least-slack edges of every S-sub-blossom.
-        for sub in subblossoms:
-            if self.blossom_label[sub] != _LABEL_S:
-                continue
-            if sub < num_vertex:
-                # Trivial blossoms don't have a list of least-slack edges,
-                # so we just look at all adjacent edges. This happens at most
-                # once per vertex per stage. It adds up to O(m) time per stage.
-                sub_edge_set = self.graph.adjacent_edges[sub]
-            else:
-                # Use the edge list of the sub-blossom, then delete it from
-                # the sub-blossom.
-                sub_edge_set_opt = self.blossom_best_edge_set[sub]
-                assert sub_edge_set_opt is not None
-                sub_edge_set = sub_edge_set_opt
-                self.blossom_best_edge_set[sub] = None
-
-            # Add edges to the temporary array.
-            for e in sub_edge_set:
-                (x, y, _w) = self.graph.edges[e]
-                bx = self.vertex_blossom[x]
-                by = self.vertex_blossom[y]
-                assert (bx == b) or (by == b)
-
-                # Reject internal edges in this blossom.
-                if bx == by:
-                    continue
-
-                # Set bi = other blossom which is reachable through this edge.
-# TODO : generalize over this pattern
-                bx = by if (bx == b) else bx
-
-                # Reject edges that don't link to an S-blossom.
-                if self.blossom_label[bx] != _LABEL_S:
-                    continue
-
-                # Keep only the least-slack edge to "vblossom".
-                slack = self.edge_slack_2x(e)
-                if ((best_edge_to_blossom[bx] == -1)
-                        or (slack < best_slack_to_blossom[bx])):
-                    best_edge_to_blossom[bx] = e
-                    best_slack_to_blossom[bx] = slack
-
-        # Extract a compact list of least-slack edge indices.
-        # We can not keep the temporary array because that would blow up
-        # memory use to O(n**2).
-        best_edge_set = [e for e in best_edge_to_blossom if e != -1]
-        self.blossom_best_edge_set[b] = best_edge_set
-
-        # Select the overall least-slack edge to any other S-blossom.
-        best_edge = -1
-        best_slack: int|float = 0
-        for e in best_edge_set:
-            slack = self.edge_slack_2x(e)
-            if (best_edge == -1) or (slack < best_slack):
-                best_edge = e
-                best_slack = slack
-        self.blossom_best_edge[b] = best_edge
+        # Merge least-slack edges for the S-sub-blossoms and transfer them
+        # to the new blossom index.
+        subblossoms_s = [
+            sub for sub in subblossoms if self.blossom_label[sub] == _LABEL_S]
+        self.blossom_best_edges.merge_blossoms(self, b, subblossoms_s)
 
     def find_path_through_blossom(
             self,
@@ -1138,9 +1338,8 @@ class _MatchingContext:
             # Attach the blossom that contains "x" to the alternating tree.
             self.blossom_link[bx] = (y, x)
 
-        # Initialize the least-slack edge list of the newly labeled blossom.
-        # This list will be filled by scanning the vertices of the blossom.
-        self.blossom_best_edge_set[bx] = []
+        # Start least-slack edge tracking for the S-blossom.
+        self.blossom_best_edges.new_blossom(bx)
 
         # Add all vertices inside the newly labeled S-blossom to the queue.
         if bx == x:
@@ -1262,27 +1461,14 @@ class _MatchingContext:
 
                 elif ylabel == _LABEL_S:
                     # Update tracking of least-slack edges between S-blossoms.
-                    best_edge = self.blossom_best_edge[bx]
-                    if ((best_edge < 0)
-                            or (slack < self.edge_slack_2x(best_edge))):
-                        self.blossom_best_edge[bx] = e
-
-                    # Update the list of least-slack edges to S-blossoms for
-                    # the blossom that contains "x".
-                    # We only do this for non-trivial blossoms.
-                    if bx != x:
-                        best_edge_set = self.blossom_best_edge_set[bx]
-                        assert best_edge_set is not None
-                        best_edge_set.append(e)
+                    self.blossom_best_edges.add_edge(self, bx, e)
 
                 if ylabel != _LABEL_S:
                     # Update tracking of least-slack edges from vertex "y" to
                     # any S-vertex. We do this for T-vertices and unlabeled
                     # vertices. Edges which already have zero slack are still
                     # tracked.
-                    best_edge = self.vertex_best_edge[y]
-                    if best_edge < 0 or slack < self.edge_slack_2x(best_edge):
-                        self.vertex_best_edge[y] = e
+                    self.vertex_best_edges.add_edge(self, y, e)
 
         # No further S vertices to scan, and no augmenting path found.
         return None
@@ -1318,37 +1504,28 @@ class _MatchingContext:
 
         # Compute delta2: minimum slack of any edge between an S-vertex and
         # an unlabeled vertex.
-        for x in range(num_vertex):
-            bx = self.vertex_blossom[x]
-            if self.blossom_label[bx] == _LABEL_NONE:
-                e = self.vertex_best_edge[x]
-                if e != -1:
-                    slack = self.edge_slack_2x(e)
-                    if slack <= delta_2x:
-                        delta_type = 2
-                        delta_2x = slack
-                        delta_edge = e
+        (e, slack) = self.vertex_best_edges.get_least_slack_edge(self)
+        if (e != -1) and (slack <= delta_2x):
+            delta_type = 2
+            delta_2x = slack
+            delta_edge = e
 
         # Compute delta3: half minimum slack of any edge between two top-level
         # S-blossoms.
-        for b in range(2 * num_vertex):
-            if ((self.blossom_label[b] == _LABEL_S)
-                    and (self.blossom_parent[b] == -1)):
-                e = self.blossom_best_edge[b]
-                if e != -1:
-                    slack = self.edge_slack_2x(e)
-                    if self.graph.integer_weights:
-                        # If all edge weights are even integers, the slack
-                        # of any edge between two S blossoms is also an even
-                        # integer. Therefore the delta is an integer.
-                        assert slack % 2 == 0
-                        slack = slack // 2
-                    else:
-                        slack = slack / 2
-                    if slack <= delta_2x:
-                        delta_type = 3
-                        delta_2x = slack
-                        delta_edge = e
+        (e, slack) = self.blossom_best_edges.get_least_slack_edge(self)
+        if e != -1:
+            if self.graph.integer_weights:
+                # If all edge weights are even integers, the slack
+                # of any edge between two S blossoms is also an even
+                # integer. Therefore the delta is an integer.
+                assert slack % 2 == 0
+                slack = slack // 2
+            else:
+                slack = slack / 2
+            if slack < delta_2x:
+                delta_type = 3
+                delta_2x = slack
+                delta_edge = e
 
         # Compute delta4: half minimum dual variable of a top-level T-blossom.
         for b in range(num_vertex, 2 * num_vertex):
