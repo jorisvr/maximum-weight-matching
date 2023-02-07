@@ -433,19 +433,22 @@ class _VertexBestEdgeTracking:
         for x in range(self.num_vertex):
             self.vertex_best_edge[x] = -1
 
-    def add_edge(self, ctx: _MatchingContext, y: int, e: int) -> None:
-        """Add the edge with index "e" from an S-vertex to unlabeled vertex
-        or T-vertex "y".
+    def add_edge(self,
+            ctx: _MatchingContext,
+            y: int,
+            e: int,
+            slack: int|float
+            ) -> None:
+        """Add edge "e" from an S-vertex to unlabeled vertex or T-vertex "y".
 
         This function takes time O(1) per call.
-        This function takes total time O(m) per stage.
+        This function is called O(m) times per stage.
         """
         best_edge = self.vertex_best_edge[y]
         if best_edge == -1:
             self.vertex_best_edge[y] = e
         else:
             best_slack = ctx.edge_slack_2x(best_edge)
-            slack = ctx.edge_slack_2x(e)
             if slack < best_slack:
                 self.vertex_best_edge[y] = e
 
@@ -532,12 +535,17 @@ class _BlossomBestEdgeTracking:
         assert self.blossom_best_edge_set[b] is None
         self.blossom_best_edge_set[b] = []
 
-    def add_edge(self, ctx: _MatchingContext, b: int, e: int) -> None:
-        """Add the edge with index "e" from S-blossom "b" to another
-        S-blossom.
+    def add_edge(
+            self,
+            ctx: _MatchingContext,
+            b: int,
+            e: int,
+            slack: int|float
+            ) -> None:
+        """Add edge "e" from S-blossom "b" to another S-blossom.
 
         This function takes time O(1) per call.
-        This function takes total time O(m) per stage.
+        This function is called O(m) times per stage.
         """
         # Update the least-slack edge from blossom "b" to any other
         # S-blossom.
@@ -546,7 +554,6 @@ class _BlossomBestEdgeTracking:
             self.blossom_best_edge[b] = e
         else:
             best_slack = ctx.edge_slack_2x(best_edge)
-            slack = ctx.edge_slack_2x(e)
             if slack < best_slack:
                 self.blossom_best_edge[b] = e
 
@@ -799,6 +806,8 @@ class _MatchingContext:
 
         Multiplication by 2 ensures that the return value is an integer
         if all edge weights are integers.
+
+        This function is called O(m) times per stage.
         """
         (x, y, w) = self.graph.edges[e]
         assert self.vertex_blossom[x] != self.vertex_blossom[y]
@@ -1417,6 +1426,7 @@ class _MatchingContext:
         adjacent_edges = self.graph.adjacent_edges
 
         # Process S-vertices waiting to be scanned.
+        # This loop runs through O(n) iterations per stage.
         while self.queue:
 
             # Take a vertex from the queue.
@@ -1427,6 +1437,7 @@ class _MatchingContext:
             assert self.blossom_label[bx] == _LABEL_S
 
             # Scan the edges that are incident on "x".
+            # This loop runs through O(m) iterations per stage.
             for e in adjacent_edges[x]:
                 (p, q, _w) = edges[e]
                 y = p if p != x else q  # TODO : consider abstracting this
@@ -1461,14 +1472,14 @@ class _MatchingContext:
 
                 elif ylabel == _LABEL_S:
                     # Update tracking of least-slack edges between S-blossoms.
-                    self.blossom_best_edges.add_edge(self, bx, e)
+                    self.blossom_best_edges.add_edge(self, bx, e, slack)
 
                 if ylabel != _LABEL_S:
                     # Update tracking of least-slack edges from vertex "y" to
                     # any S-vertex. We do this for T-vertices and unlabeled
                     # vertices. Edges which already have zero slack are still
                     # tracked.
-                    self.vertex_best_edges.add_edge(self, y, e)
+                    self.vertex_best_edges.add_edge(self, y, e, slack)
 
         # No further S vertices to scan, and no augmenting path found.
         return None
