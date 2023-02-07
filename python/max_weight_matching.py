@@ -34,13 +34,13 @@ def maximum_weight_matching(
     This function uses O(n + m) memory, where "m" is the number of edges.
 
     Parameters:
-        edges: List of edges, each edge specified as a tuple "(i, j, w)"
-            where "i" and "j" are vertex indices and "w" is the edge weight.
+        edges: List of edges, each edge specified as a tuple "(x, y, w)"
+            where "x" and "y" are vertex indices and "w" is the edge weight.
 
     Returns:
         List of pairs of matched vertex indices.
-        This is a subset of the list of edges in the graph.
-        It contains a tuple "(i, j)" if vertex "i" is matched to vertex "j".
+        This is a subset of the edges in the graph.
+        It contains a tuple "(x, y)" if vertex "x" is matched to vertex "y".
 
     Raises:
         ValueError: If the input does not satisfy the constraints.
@@ -76,7 +76,7 @@ def maximum_weight_matching(
 
     # Extract the final solution.
     pairs: list[tuple[int, int]] = [
-        (i, j) for (i, j, _w) in edges if ctx.vertex_mate[i] == j]
+        (x, y) for (x, y, _w) in edges if ctx.vertex_mate[x] == y]
 
     # Verify that the matching is optimal.
     # This only works reliably for integer weights.
@@ -130,8 +130,8 @@ def adjust_weights_for_maximum_cardinality_matching(
     This function takes time O(m), where "m" is the number of edges.
 
     Parameters:
-        edges: List of edges, each edge specified as a tuple "(i, j, w)"
-            where "i" and "j" are vertex indices and "w" is the edge weight.
+        edges: List of edges, each edge specified as a tuple "(x, y, w)"
+            where "x" and "y" are vertex indices and "w" is the edge weight.
 
     Returns:
         List of edges with adjusted weights. If no adjustments are necessary,
@@ -148,10 +148,10 @@ def adjust_weights_for_maximum_cardinality_matching(
     if not edges:
         return edges
 
-    num_vertex = 1 + max(max(i, j) for (i, j, _w) in edges)
+    num_vertex = 1 + max(max(x, y) for (x, y, _w) in edges)
 
-    min_weight = min(w for (_i, _j, w) in edges)
-    max_weight = max(w for (_i, _j, w) in edges)
+    min_weight = min(w for (_x, _y, w) in edges)
+    max_weight = max(w for (_x, _y, w) in edges)
     weight_range = max_weight - min_weight
 
     # Do nothing if the weights already ensure a maximum-cardinality matching.
@@ -170,7 +170,7 @@ def adjust_weights_for_maximum_cardinality_matching(
     assert delta >= 0
 
     # Increase all edge weights by "delta".
-    return [(i, j, w + delta) for (i, j, w) in edges]
+    return [(x, y, w + delta) for (x, y, w) in edges]
 
 
 def _check_input_types(edges: list[tuple[int, int, int|float]]) -> None:
@@ -180,8 +180,8 @@ def _check_input_types(edges: list[tuple[int, int, int|float]]) -> None:
     This function takes time O(m).
 
     Parameters:
-        edges: List of edges, each edge specified as a tuple "(i, j, w)"
-            where "i" and "j" are edge indices and "w" is the edge weight.
+        edges: List of edges, each edge specified as a tuple "(x, y, w)"
+            where "x" and "y" are edge indices and "w" is the edge weight.
 
     Raises:
         ValueError: If the input does not satisfy the constraints.
@@ -197,12 +197,12 @@ def _check_input_types(edges: list[tuple[int, int, int|float]]) -> None:
         if (not isinstance(e, tuple)) or (len(e) != 3):
             raise TypeError("Each edge must be specified as a 3-tuple")
 
-        (i, j, w) = e
+        (x, y, w) = e
 
-        if (not isinstance(i, int)) or (not isinstance(j, int)):
+        if (not isinstance(x, int)) or (not isinstance(y, int)):
             raise TypeError("Edge endpoints must be integers")
 
-        if (i < 0) or (j < 0):
+        if (x < 0) or (y < 0):
             raise ValueError("Edge endpoints must be non-negative integers")
 
         if not isinstance(w, (int, float)):
@@ -227,23 +227,23 @@ def _check_input_graph(edges: list[tuple[int, int, int|float]]) -> None:
     This function takes time O(m * log(m)).
 
     Parameters:
-        edges: List of edges, each edge specified as a tuple "(i, j, w)"
-            where "i" and "j" are edge indices and "w" is the edge weight.
+        edges: List of edges, each edge specified as a tuple "(x, y, w)"
+            where "x" and "y" are edge indices and "w" is the edge weight.
 
     Raises:
         ValueError: If the input does not satisfy the constraints.
     """
 
     # Check that the graph has no self-edges.
-    for (i, j, _w) in edges:
-        if i == j:
+    for (x, y, _w) in edges:
+        if x == y:
             raise ValueError("Self-edges are not supported")
 
     # Check that the graph does not have multi-edges.
     # Using a set() would be more straightforward, but the runtime bounds
     # of the Python set type are not clearly specified.
     # Sorting provides guaranteed O(m * log(m)) run time.
-    edge_endpoints = [((i, j) if (i < j) else (j, i)) for (i, j, _w) in edges]
+    edge_endpoints = [((x, y) if (x < y) else (y, x)) for (x, y, _w) in edges]
     edge_endpoints.sort()
 
     for i in range(len(edge_endpoints) - 1):
@@ -283,9 +283,9 @@ class _GraphInfo:
         # Each edge is incident on two vertices.
         # Each edge also has a weight.
         #
-        # "edges[e] = (i, j, w)" where
+        # "edges[e] = (x, y, w)" where
         #     "e" is an edge index;
-        #     "i" and "j" are vertex indices of the incident vertices;
+        #     "x" and "y" are vertex indices of the incident vertices;
         #     "w" is the edge weight.
         #
         # These data remain unchanged while the algorithm runs.
@@ -293,7 +293,7 @@ class _GraphInfo:
 
         # num_vertex = the number of vertices.
         if edges:
-            self.num_vertex = 1 + max(max(i, j) for (i, j, _w) in edges)
+            self.num_vertex = 1 + max(max(x, y) for (x, y, _w) in edges)
         else:
             self.num_vertex = 0
 
@@ -305,14 +305,14 @@ class _GraphInfo:
         # These data remain unchanged while the algorithm runs.
         self.adjacent_edges: list[list[int]] = [
             [] for v in range(self.num_vertex)]
-        for (e, (i, j, _w)) in enumerate(edges):
-            self.adjacent_edges[i].append(e)
-            self.adjacent_edges[j].append(e)
+        for (e, (x, y, _w)) in enumerate(edges):
+            self.adjacent_edges[x].append(e)
+            self.adjacent_edges[y].append(e)
 
         # Determine whether _all_ weights are integers.
         # In this case we can avoid floating point computations entirely.
         self.integer_weights: bool = all(isinstance(w, int)
-                                         for (_i, _j, w) in edges)
+                                         for (_x, _y, w) in edges)
 
 
 # Each vertex may be labeled "S" (outer) or "T" (inner) or be unlabeled.
@@ -371,11 +371,11 @@ class _Blossom:
         self.subblossoms: list[int] = subblossoms
 
         # "edges" is a list of edges linking the sub-blossoms.
-        # Each edge is represented as an ordered pair "(i, j)" where "i"
-        # and "j" are vertex indices.
+        # Each edge is represented as an ordered pair "(x, y)" where "x"
+        # and "y" are vertex indices.
         #
-        # "edges[0] = (i, j)" where vertex "i" in "subblossoms[0]" is
-        # adjacent to vertex "j" in "subblossoms[1]", etc.
+        # "edges[0] = (x, y)" where vertex "x" in "subblossoms[0]" is
+        # adjacent to vertex "y" in "subblossoms[1]", etc.
         self.edges: list[tuple[int, int]] = edges
 
         # "base_vertex" is the vertex index of the base of the blossom.
@@ -416,9 +416,9 @@ class _MatchingContext:
         # Each vertex is either single (unmatched) or matched to
         # another vertex.
         #
-        # If vertex "i" is matched to vertex "j",
-        # "vertex_mate[i] == j" and "vertex_mate[j] == i".
-        # If vertex "i" is unmatched, "vertex_mate[i] == -1".
+        # If vertex "x" is matched to vertex "y",
+        # "vertex_mate[x] == y" and "vertex_mate[y] == x".
+        # If vertex "x" is unmatched, "vertex_mate[x] == -1".
         #
         # Initially all vertices are unmatched.
         self.vertex_mate: list[int] = num_vertex * [-1]
@@ -447,9 +447,9 @@ class _MatchingContext:
         # Every vertex is part of exactly one top-level blossom,
         # possibly a trivial blossom consisting of just that vertex.
         #
-        # "vertex_blossom[i]" is the index of the top-level blossom that
-        # contains vertex "i".
-        # "vertex_blossom[i] == i" if the "i" is a trivial top-level blossom.
+        # "vertex_blossom[x]" is the index of the top-level blossom that
+        # contains vertex "x".
+        # "vertex_blossom[x] == x" if the "x" is a trivial top-level blossom.
         #
         # Initially all vertices are top-level trivial blossoms.
         self.vertex_blossom: list[int] = list(range(num_vertex))
@@ -463,14 +463,13 @@ class _MatchingContext:
 
         # Every vertex has a variable in the dual LPP.
         #
-        # "dual_var_2x[i]" is 2 times the dual variable of vertex "i".
+        # "vertex_dual_2x[x]" is 2 times the dual variable of vertex "x".
         # Multiplication by 2 ensures that the values are integers
         # if all edge weights are integers.
         #
         # Vertex duals are initialized to half the maximum edge weight.
-        max_weight = max(w for (_i, _j, w) in graph.edges)
-# TODO : rename to "vertex_dual_2x"
-        self.dual_var_2x: list[int|float] = num_vertex * [max_weight]
+        max_weight = max(w for (_x, _y, w) in graph.edges)
+        self.vertex_dual_2x: list[int|float] = num_vertex * [max_weight]
 
         # Top-level blossoms that are part of an alternating tree are
         # labeled S or T. Unlabeled top-level blossoms are not (yet)
@@ -484,17 +483,17 @@ class _MatchingContext:
         # For each labeled blossom, we keep track of the edge that attaches
         # it to its alternating tree.
         #
-        # "blossom_link[b] = (i, j)" denotes the edge through which
-        # blossom "b" is attached to the alternating tree, where "i" and "j"
-        # are vertex indices and vertex "j" is contained in blossom "b".
+        # "blossom_link[b] = (x, y)" denotes the edge through which
+        # blossom "b" is attached to the alternating tree, where "x" and "y"
+        # are vertex indices and vertex "y" is contained in blossom "b".
         #
         # "blossom_link[b] = None" if "b" is the root of an alternating tree,
         # or if "b" is not a labeled, top-level blossom.
         self.blossom_link: list[Optional[tuple[int, int]]] = [
             None for b in range(2 * num_vertex)]
 
-        # "vertex_best_edge[i]" is the edge index of the least-slack edge
-        # between "i" and any S-vertex, or -1 if no such edge has been found.
+        # "vertex_best_edge[x]" is the edge index of the least-slack edge
+        # between "x" and any S-vertex, or -1 if no such edge has been found.
         self.vertex_best_edge: list[int] = num_vertex * [-1]
 
         # For non-trivial top-level S-blossom "b",
@@ -524,9 +523,9 @@ class _MatchingContext:
         Multiplication by 2 ensures that the return value is an integer
         if all edge weights are integers.
         """
-        (i, j, w) = self.graph.edges[e]
-        assert self.vertex_blossom[i] != self.vertex_blossom[j]
-        return self.dual_var_2x[i] + self.dual_var_2x[j] - 2 * w
+        (x, y, w) = self.graph.edges[e]
+        assert self.vertex_blossom[x] != self.vertex_blossom[y]
+        return self.vertex_dual_2x[x] + self.vertex_dual_2x[y] - 2 * w
 
     def get_blossom(self, b: int) -> _Blossom:
         """Return the Blossom instance for blossom index "b"."""
@@ -570,15 +569,15 @@ class _MatchingContext:
         self.queue.clear()
 
         # Reset least-slack edge tracking.
-        for i in range(num_vertex):
-            self.vertex_best_edge[i] = -1
+        for x in range(num_vertex):
+            self.vertex_best_edge[x] = -1
 
         for b in range(2 * num_vertex):
             self.blossom_best_edge_set[b] = None
             self.blossom_best_edge[b] = -1
 
-    def trace_alternating_paths(self, i: int, j: int) -> _AlternatingPath:
-        """Trace back through the alternating trees from vertices "i" and "j".
+    def trace_alternating_paths(self, x: int, y: int) -> _AlternatingPath:
+        """Trace back through the alternating trees from vertices "x" and "y".
 
         If both vertices are part of the same alternating tree, this function
         discovers a new blossom. In this case it returns an alternating path
@@ -599,45 +598,45 @@ class _MatchingContext:
         blossom_marker = self.blossom_marker
         marked_blossoms: list[int] = []
 
-        # "iedges" is a list of edges used while tracing from "i".
-        # "jedges" is a list of edges used while tracing from "j".
-        iedges: list[tuple[int, int]] = []
-        jedges: list[tuple[int, int]] = []
+        # "xedges" is a list of edges used while tracing from "x".
+        # "yedges" is a list of edges used while tracing from "y".
+        xedges: list[tuple[int, int]] = []
+        yedges: list[tuple[int, int]] = []
 
-        # Pre-load the edge between "i" and "j" so it will end up in the right
+        # Pre-load the edge between "x" and "y" so it will end up in the right
         # place in the final path.
-        iedges.append((i, j))
+        xedges.append((x, y))
 
-        # Alternate between tracing the path from "i" and the path from "j".
+        # Alternate between tracing the path from "x" and the path from "y".
         # This ensures that the search time is bounded by the size of the
         # newly found blossom.
 # TODO : this code is a bit shady; maybe reconsider the swapping trick
         first_common = -1
-        while i != -1 or j != -1:
+        while x != -1 or y != -1:
 
             # Check if we found a common ancestor.
-            bi = self.vertex_blossom[i]
-            if blossom_marker[bi]:
-                first_common = bi
+            bx = self.vertex_blossom[x]
+            if blossom_marker[bx]:
+                first_common = bx
                 break
 
             # Mark blossom as a potential common ancestor.
-            blossom_marker[bi] = True
-            marked_blossoms.append(bi)
+            blossom_marker[bx] = True
+            marked_blossoms.append(bx)
 
             # Track back through the link in the alternating tree.
-            link = self.blossom_link[bi]
+            link = self.blossom_link[bx]
             if link is None:
                 # Reached the root of this alternating tree.
-                i = -1
+                x = -1
             else:
-                iedges.append(link)
-                i = link[0]
+                xedges.append(link)
+                x = link[0]
 
-            # Swap "i" and "j" to alternate between paths.
-            if j != -1:
-                i, j = j, i
-                iedges, jedges = jedges, iedges
+            # Swap "x" and "y" to alternate between paths.
+            if y != -1:
+                (x, y) = (y, x)
+                (xedges, yedges) = (yedges, xedges)
 
         # Remove all markers we placed.
         for b in marked_blossoms:
@@ -646,15 +645,15 @@ class _MatchingContext:
         # If we found a common ancestor, trim the paths so they end there.
 # TODO : also this is just plain ugly - try to rework
         if first_common != -1:
-            assert self.vertex_blossom[iedges[-1][0]] == first_common
-            while (jedges
-                    and (self.vertex_blossom[jedges[-1][0]] != first_common)):
-                jedges.pop()
+            assert self.vertex_blossom[xedges[-1][0]] == first_common
+            while (yedges
+                    and (self.vertex_blossom[yedges[-1][0]] != first_common)):
+                yedges.pop()
 
         # Fuse the two paths.
         # Flip the order of one path and the edge tuples in the other path
         # to obtain a continuous path with correctly ordered edge tuples.
-        path_edges = iedges[::-1] + [(j, i) for (i, j) in jedges]
+        path_edges = xedges[::-1] + [(y, x) for (x, y) in yedges]
 
         # Any S-to-S alternating path must have odd length.
         assert len(path_edges) % 2 == 1
@@ -677,12 +676,12 @@ class _MatchingContext:
         assert len(path.edges) >= 3
 
         # Construct the list of sub-blossoms (current top-level blossoms).
-        subblossoms = [self.vertex_blossom[i] for (i, j) in path.edges]
+        subblossoms = [self.vertex_blossom[x] for (x, y) in path.edges]
 
         # Check that the path is cyclic.
         # Note the path may not start and end with the same _vertex_,
         # but it must start and end in the same _blossom_.
-        subblossoms_next = [self.vertex_blossom[j] for (i, j) in path.edges]
+        subblossoms_next = [self.vertex_blossom[y] for (x, y) in path.edges]
         assert subblossoms[0] == subblossoms_next[-1]
         assert subblossoms[1:] == subblossoms_next[:-1]
 
@@ -710,8 +709,8 @@ class _MatchingContext:
         #       to O(n**2) total time per stage.
         #       This could be improved through a union-find datastructure, or
         #       by re-using the blossom index of the largest sub-blossom.
-        for i in self.blossom_vertices(b):
-            self.vertex_blossom[i] = b
+        for x in self.blossom_vertices(b):
+            self.vertex_blossom[x] = b
 
         # Assign label S to the new blossom.
         assert self.blossom_label[base_blossom] == _LABEL_S
@@ -767,28 +766,29 @@ class _MatchingContext:
 
             # Add edges to the temporary array.
             for e in sub_edge_set:
-                (i, j, _w) = self.graph.edges[e]
-                bi = self.vertex_blossom[i]
-                bj = self.vertex_blossom[j]
-                assert (bi == b) or (bj == b)
+                (x, y, _w) = self.graph.edges[e]
+                bx = self.vertex_blossom[x]
+                by = self.vertex_blossom[y]
+                assert (bx == b) or (by == b)
 
                 # Reject internal edges in this blossom.
-                if bi == bj:
+                if bx == by:
                     continue
 
                 # Set bi = other blossom which is reachable through this edge.
-                bi = bj if (bi == b) else bi
+# TODO : generalize over this pattern
+                bx = by if (bx == b) else bx
 
                 # Reject edges that don't link to an S-blossom.
-                if self.blossom_label[bi] != _LABEL_S:
+                if self.blossom_label[bx] != _LABEL_S:
                     continue
 
                 # Keep only the least-slack edge to "vblossom".
                 slack = self.edge_slack_2x(e)
-                if ((best_edge_to_blossom[bi] == -1)
-                        or (slack < best_slack_to_blossom[bi])):
-                    best_edge_to_blossom[bi] = e
-                    best_slack_to_blossom[bi] = slack
+                if ((best_edge_to_blossom[bx] == -1)
+                        or (slack < best_slack_to_blossom[bx])):
+                    best_edge_to_blossom[bx] = e
+                    best_slack_to_blossom[bx] = slack
 
         # Extract a compact list of least-slack edge indices.
         # We can not keep the temporary array because that would blow up
@@ -878,8 +878,8 @@ class _MatchingContext:
             if sub < num_vertex:
                 self.vertex_blossom[sub] = sub
             else:
-                for i in self.blossom_vertices(sub):
-                    self.vertex_blossom[i] = sub
+                for x in self.blossom_vertices(sub):
+                    self.vertex_blossom[x] = sub
             assert self.blossom_label[sub] == _LABEL_NONE
 
         # The expanding blossom was part of an alternating tree, linked to
@@ -893,12 +893,12 @@ class _MatchingContext:
 # TODO : uglyness with the assertion
         entry_link = self.blossom_link[b]
         assert entry_link is not None
-        (i, j) = entry_link
-        sub = self.vertex_blossom[j]
+        (x, y) = entry_link
+        sub = self.vertex_blossom[y]
 
         # Assign label T to that sub-blossom.
         self.blossom_label[sub] = _LABEL_T
-        self.blossom_link[sub] = (i, j)
+        self.blossom_link[sub] = (x, y)
 
         # Walk through the expanded blossom from "sub" to the base vertex.
         # Assign alternating S and T labels to the sub-blossoms and attach
@@ -907,15 +907,15 @@ class _MatchingContext:
 
         for p in range(0, len(path_edges), 2):
             #
-            #   (p) ==(j,i)== (p+1) ----- (p+2)
+            #   (p) ==(y,x)== (p+1) ----- (p+2)
             #    T              S           T
             #
             # path_nodes[p] has already been labeled T.
             # We now assign labels to path_nodes[p+1] and path_nodes[p+2].
 
             # Assign label S to path_nodes[p+1].
-            (j, i) = path_edges[p]
-            self.assign_label_s(i)
+            (y, x) = path_edges[p]
+            self.assign_label_s(x)
 
             # Assign label T to path_nodes[i+2] and attach it to path_nodes[p+1].
             sub = path_nodes[p+2]
@@ -981,16 +981,16 @@ class _MatchingContext:
                         # This sub-blossom will not be expanded;
                         # it now becomes top-level. Update its vertices
                         # to point to this sub-blossom.
-                        for i in self.blossom_vertices(sub):
-                            self.vertex_blossom[i] = sub
+                        for x in self.blossom_vertices(sub):
+                            self.vertex_blossom[x] = sub
 
             # Delete the expanded blossom. Recycle its blossom index.
             self.blossom[b] = None
             self.unused_blossoms.append(b)
 
-    def augment_blossom(self, b: int, i: int) -> None:
+    def augment_blossom(self, b: int, sub: int) -> None:
         """Augment along an alternating path through blossom "b",
-        from vertex "i" to the base vertex of the blossom.
+        from sub-blossom "sub" to the base vertex of the blossom.
 
         This function takes time O(n).
         """
@@ -999,7 +999,7 @@ class _MatchingContext:
 # TODO : cleanup explicit stack
 
         # Use an explicit stack to avoid deep recursion.
-        stack = [(b, i)]
+        stack = [(b, sub)]
 
         while stack:
             (top_blossom, sub) = stack.pop()
@@ -1031,19 +1031,19 @@ class _MatchingContext:
                 #
 
                 # Pull the edge (i, j) into the matching.
-                (i, j) = path_edges[p+1]
-                self.vertex_mate[i] = j
-                self.vertex_mate[j] = i
+                (x, y) = path_edges[p+1]
+                self.vertex_mate[x] = y
+                self.vertex_mate[y] = x
 
                 # Augment through the subblossoms touching the edge (i, j).
                 # Nothing needs to be done for trivial subblossoms.
-                bi = path_nodes[p+1]
-                if bi >= num_vertex:
-                    stack.append((bi, i))
+                bx = path_nodes[p+1]
+                if bx >= num_vertex:
+                    stack.append((bx, x))
 
-                bj = path_nodes[p+2]
-                if bj >= num_vertex:
-                    stack.append((bj, j))
+                by = path_nodes[p+2]
+                if by >= num_vertex:
+                    stack.append((by, y))
 
             # Rotate the subblossom list so the new base ends up in position 0.
             p = blossom.subblossoms.index(sub)
@@ -1068,11 +1068,11 @@ class _MatchingContext:
         # Check that the augmenting path starts and ends in
         # an unmatched vertex or a blossom with unmatched base.
         assert len(path.edges) % 2 == 1
-        for i in (path.edges[0][0], path.edges[-1][1]):
-            b = self.vertex_blossom[i]
-            if b != i:
-                i = self.get_blossom(b).base_vertex
-            assert self.vertex_mate[i] == -1
+        for x in (path.edges[0][0], path.edges[-1][1]):
+            b = self.vertex_blossom[x]
+            if b != x:
+                x = self.get_blossom(b).base_vertex
+            assert self.vertex_mate[x] == -1
 
         # The augmenting path looks like this:
         #
@@ -1085,96 +1085,96 @@ class _MatchingContext:
         #
         # This loop walks along the edges of this path that were not matched
         # before augmenting.
-        for (i, j) in path.edges[0::2]:
+        for (x, y) in path.edges[0::2]:
 
             # Augment the non-trivial blossoms on either side of this edge.
             # No action is necessary for trivial blossoms.
-            bi = self.vertex_blossom[i]
-            if bi != i:
-                self.augment_blossom(bi, i)
+            bx = self.vertex_blossom[x]
+            if bx != x:
+                self.augment_blossom(bx, x)
 
-            bj = self.vertex_blossom[j]
-            if bj != j:
-                self.augment_blossom(bj, j)
+            by = self.vertex_blossom[y]
+            if by != y:
+                self.augment_blossom(by, y)
 
             # Pull the edge into the matching.
-            self.vertex_mate[i] = j
-            self.vertex_mate[j] = i
+            self.vertex_mate[x] = y
+            self.vertex_mate[y] = x
 
-    def assign_label_s(self, i: int) -> None:
-        """Assign label S to the unlabeled blossom that contains vertex "i".
+    def assign_label_s(self, x: int) -> None:
+        """Assign label S to the unlabeled blossom that contains vertex "x".
 
-        If vertex "i" is matched, it is attached to the alternating tree
-        via its matched edge. If vertex "i" is unmatched, it becomes the root
+        If vertex "x" is matched, it is attached to the alternating tree
+        via its matched edge. If vertex "x" is unmatched, it becomes the root
         of an alternating tree.
 
         All vertices in the newly labeled blossom are added to the scan queue.
 
         Precondition:
-            "i" is an unlabeled vertex, either unmatched or matched to
+            "x" is an unlabeled vertex, either unmatched or matched to
             a T-vertex via a tight edge.
         """
 
         # Assign label S to the blossom that contains vertex "v".
-        bi = self.vertex_blossom[i]
-        assert self.blossom_label[bi] == _LABEL_NONE
-        self.blossom_label[bi] = _LABEL_S
+        bx = self.vertex_blossom[x]
+        assert self.blossom_label[bx] == _LABEL_NONE
+        self.blossom_label[bx] = _LABEL_S
 
-        j = self.vertex_mate[i]
-        if j == -1:
-            # Vertex "i" is unmatched.
+        y = self.vertex_mate[x]
+        if y == -1:
+            # Vertex "x" is unmatched.
             # It must be either a top-level vertex or the base vertex of
             # a top-level blossom.
-            assert (bi == i) or (self.get_blossom(bi).base_vertex == i)
+            assert (bx == x) or (self.get_blossom(bx).base_vertex == x)
 
             # Mark the blossom that contains "v" as root of an alternating tree.
-            self.blossom_link[bi] = None
+            self.blossom_link[bx] = None
 
         else:
-            # Vertex "i" is matched to T-vertex "j".
-            bj = self.vertex_blossom[j]
-            assert self.blossom_label[bj] == _LABEL_T
+            # Vertex "x" is matched to T-vertex "y".
+            by = self.vertex_blossom[y]
+            assert self.blossom_label[by] == _LABEL_T
 
-            # Attach the blossom that contains "i" to the alternating tree.
-            self.blossom_link[bi] = (j, i)
+            # Attach the blossom that contains "x" to the alternating tree.
+            self.blossom_link[bx] = (y, x)
 
         # Initialize the least-slack edge list of the newly labeled blossom.
         # This list will be filled by scanning the vertices of the blossom.
-        self.blossom_best_edge_set[bi] = []
+        self.blossom_best_edge_set[bx] = []
 
         # Add all vertices inside the newly labeled S-blossom to the queue.
-        if bi == i:
-            self.queue.append(i)
+        if bx == x:
+            self.queue.append(x)
         else:
-            self.queue.extend(self.blossom_vertices(bi))
+            self.queue.extend(self.blossom_vertices(bx))
 
-    def assign_label_t(self, i: int, j: int) -> None:
-        """Assign label T to the unlabeled blossom that contains vertex "j".
+    def assign_label_t(self, x: int, y: int) -> None:
+        """Assign label T to the unlabeled blossom that contains vertex "y".
 
-        Attach it to the alternating tree via edge (i, j).
-        Then immediately assign label S to the mate of vertex "j".
+        Attach it to the alternating tree via edge (x, y).
+        Then immediately assign label S to the mate of vertex "y".
 
         Preconditions:
-         - "i" is an S-vertex.
-         - "j" is an unlabeled, matched vertex.
-         - There is a tight edge between vertices "i" and "j".
+         - "x" is an S-vertex.
+         - "y" is an unlabeled, matched vertex.
+         - There is a tight edge between vertices "x" and "y".
         """
-        assert self.blossom_label[self.vertex_blossom[i]] == _LABEL_S
+        assert self.blossom_label[self.vertex_blossom[x]] == _LABEL_S
 
         # Assign label T to the unlabeled blossom.
-        bj = self.vertex_blossom[j]
-        assert self.blossom_label[bj] == _LABEL_NONE
-        self.blossom_label[bj] = _LABEL_T
-        self.blossom_link[bj] = (i, j)
+        by = self.vertex_blossom[y]
+        assert self.blossom_label[by] == _LABEL_NONE
+        self.blossom_label[by] = _LABEL_T
+        self.blossom_link[by] = (x, y)
 
-        # Assign label S to the blossom that contains the mate of vertex "j".
-        jbase = j if bj == j else self.get_blossom(bj).base_vertex
-        k = self.vertex_mate[jbase]
-        assert k != -1
-        self.assign_label_s(k)
+        # Assign label S to the blossom that contains the mate of vertex "y".
+        ybase = y if by == y else self.get_blossom(by).base_vertex
+        z = self.vertex_mate[ybase]
+        assert z != -1
+        self.assign_label_s(z)
 
-    def add_s_to_s_edge(self, i: int, j: int) -> Optional[_AlternatingPath]:
-        """Add the edge between S-vertices "i" and "j".
+    def add_s_to_s_edge(self, x: int, y: int) -> Optional[_AlternatingPath]:
+        """Add the edge between S-vertices "x" and "y".
 
         If the edge connects blossoms that are part of the same alternating
         tree, this function creates a new S-blossom and returns None.
@@ -1187,8 +1187,8 @@ class _MatchingContext:
             Augmenting path if found; otherwise None.
         """
 
-        # Trace back through the alternating trees from "i" and "j".
-        path = self.trace_alternating_paths(i, j)
+        # Trace back through the alternating trees from "x" and "y".
+        path = self.trace_alternating_paths(x, y)
 
         # If the path is a cycle, create a new blossom.
         # Otherwise the path is an augmenting path.
@@ -1221,68 +1221,68 @@ class _MatchingContext:
         while self.queue:
 
             # Take a vertex from the queue.
-            i = self.queue.pop()
+            x = self.queue.pop()
 
-            # Double-check that "v" is an S-vertex.
-            bi = self.vertex_blossom[i]
-            assert self.blossom_label[bi] == _LABEL_S
+            # Double-check that "x" is an S-vertex.
+            bx = self.vertex_blossom[x]
+            assert self.blossom_label[bx] == _LABEL_S
 
-            # Scan the edges that are incident on "v".
-            for e in adjacent_edges[i]:
+            # Scan the edges that are incident on "x".
+            for e in adjacent_edges[x]:
                 (p, q, _w) = edges[e]
-                j = p if p != i else q  # TODO : consider abstracting this
+                y = p if p != x else q  # TODO : consider abstracting this
 
-                # Consider the edge between vertices "i" and "j".
+                # Consider the edge between vertices "x" and "y".
                 # Try to pull this edge into an alternating tree.
 
-                # Note: blossom index of vertex "i" may change during
+                # Note: blossom index of vertex "x" may change during
                 # this loop, so we need to refresh it here.
-                bi = self.vertex_blossom[i]
-                bj = self.vertex_blossom[j]
+                bx = self.vertex_blossom[x]
+                by = self.vertex_blossom[y]
 
                 # Ignore edges that are internal to a blossom.
-                if bi == bj:
+                if bx == by:
                     continue
 
-                jlabel = self.blossom_label[bj]
+                ylabel = self.blossom_label[by]
 
                 # Check whether this edge is tight (has zero slack).
                 # Only tight edges may be part of an alternating tree.
                 slack = self.edge_slack_2x(e)
                 if slack <= 0:
-                    if jlabel == _LABEL_NONE:
-                        # Assign label T to the blossom that contains "j".
-                        self.assign_label_t(i, j)
-                    elif jlabel == _LABEL_S:
+                    if ylabel == _LABEL_NONE:
+                        # Assign label T to the blossom that contains "y".
+                        self.assign_label_t(x, y)
+                    elif ylabel == _LABEL_S:
                         # This edge connects two S-blossoms. Use it to find
                         # either a new blossom or an augmenting path.
-                        alternating_path = self.add_s_to_s_edge(i, j)
+                        alternating_path = self.add_s_to_s_edge(x, y)
                         if alternating_path is not None:
                             return alternating_path
 
-                elif jlabel == _LABEL_S:
+                elif ylabel == _LABEL_S:
                     # Update tracking of least-slack edges between S-blossoms.
-                    best_edge = self.blossom_best_edge[bi]
+                    best_edge = self.blossom_best_edge[bx]
                     if ((best_edge < 0)
                             or (slack < self.edge_slack_2x(best_edge))):
-                        self.blossom_best_edge[bi] = e
+                        self.blossom_best_edge[bx] = e
 
                     # Update the list of least-slack edges to S-blossoms for
-                    # the blossom that contains "i".
+                    # the blossom that contains "x".
                     # We only do this for non-trivial blossoms.
-                    if bi != i:
-                        best_edge_set = self.blossom_best_edge_set[bi]
+                    if bx != x:
+                        best_edge_set = self.blossom_best_edge_set[bx]
                         assert best_edge_set is not None
                         best_edge_set.append(e)
 
-                if jlabel != _LABEL_S:
-                    # Update tracking of least-slack edges from vertex "j" to
+                if ylabel != _LABEL_S:
+                    # Update tracking of least-slack edges from vertex "y" to
                     # any S-vertex. We do this for T-vertices and unlabeled
                     # vertices. Edges which already have zero slack are still
                     # tracked.
-                    best_edge = self.vertex_best_edge[j]
+                    best_edge = self.vertex_best_edge[y]
                     if best_edge < 0 or slack < self.edge_slack_2x(best_edge):
-                        self.vertex_best_edge[j] = e
+                        self.vertex_best_edge[y] = e
 
         # No further S vertices to scan, and no augmenting path found.
         return None
@@ -1312,16 +1312,16 @@ class _MatchingContext:
         # Compute delta1: minimum dual variable of any S-vertex.
         delta_type = 1
         delta_2x = min(
-            self.dual_var_2x[i]
-            for i in range(num_vertex)
-            if self.blossom_label[self.vertex_blossom[i]] == _LABEL_S)
+            self.vertex_dual_2x[x]
+            for x in range(num_vertex)
+            if self.blossom_label[self.vertex_blossom[x]] == _LABEL_S)
 
         # Compute delta2: minimum slack of any edge between an S-vertex and
         # an unlabeled vertex.
-        for i in range(num_vertex):
-            bi = self.vertex_blossom[i]
-            if self.blossom_label[bi] == _LABEL_NONE:
-                e = self.vertex_best_edge[i]
+        for x in range(num_vertex):
+            bx = self.vertex_blossom[x]
+            if self.blossom_label[bx] == _LABEL_NONE:
+                e = self.vertex_best_edge[x]
                 if e != -1:
                     slack = self.edge_slack_2x(e)
                     if slack <= delta_2x:
@@ -1368,14 +1368,14 @@ class _MatchingContext:
         num_vertex = self.graph.num_vertex
 
         # Apply delta to dual variables of all vertices.
-        for i in range(num_vertex):
-            ilabel = self.blossom_label[self.vertex_blossom[i]]
-            if ilabel == _LABEL_S:
+        for x in range(num_vertex):
+            xlabel = self.blossom_label[self.vertex_blossom[x]]
+            if xlabel == _LABEL_S:
                 # S-vertex: subtract delta from dual variable.
-                self.dual_var_2x[i] -= delta_2x
-            elif ilabel == _LABEL_T:
+                self.vertex_dual_2x[x] -= delta_2x
+            elif xlabel == _LABEL_T:
                 # T-vertex: add delta to dual variable.
-                self.dual_var_2x[i] += delta_2x
+                self.vertex_dual_2x[x] += delta_2x
 
         # Apply delta to dual variables of top-level non-trivial blossoms.
         for b in range(num_vertex, 2 * num_vertex):
@@ -1406,9 +1406,9 @@ class _MatchingContext:
         num_vertex = self.graph.num_vertex
 
         # Assign label S to all unmatched vertices and put them in the queue.
-        for i in range(num_vertex):
-            if self.vertex_mate[i] == -1:
-                self.assign_label_s(i)
+        for x in range(num_vertex):
+            if self.vertex_mate[x] == -1:
+                self.assign_label_s(x)
 
         # Stop if all vertices are matched.
         # No further improvement is possible in that case.
@@ -1442,16 +1442,16 @@ class _MatchingContext:
             if delta_type == 2:
                 # Use the edge from S-vertex to unlabeled vertex that got
                 # unlocked through the delta update.
-                (i, j, _w) = self.graph.edges[delta_edge]
-                if self.blossom_label[self.vertex_blossom[i]] != _LABEL_S:
-                    (i, j) = (j, i)
-                self.assign_label_t(i, j)
+                (x, y, _w) = self.graph.edges[delta_edge]
+                if self.blossom_label[self.vertex_blossom[x]] != _LABEL_S:
+                    (x, y) = (y, x)
+                self.assign_label_t(x, y)
 
             elif delta_type == 3:
                 # Use the S-to-S edge that got unlocked through the delta update.
                 # This may reveal an augmenting path.
-                (i, j, _w) = self.graph.edges[delta_edge]
-                augmenting_path = self.add_s_to_s_edge(i, j)
+                (x, y, _w) = self.graph.edges[delta_edge]
+                augmenting_path = self.add_s_to_s_edge(x, y)
                 if augmenting_path is not None:
                     break
 
@@ -1493,7 +1493,7 @@ def _verify_optimum(ctx: _MatchingContext) -> None:
     num_vertex = ctx.graph.num_vertex
 
     vertex_mate = ctx.vertex_mate
-    vertex_dual_var_2x = ctx.dual_var_2x
+    vertex_dual_var_2x = ctx.vertex_dual_2x
 
     # Extract dual values of blossoms
     blossom_dual_var = [
@@ -1502,13 +1502,13 @@ def _verify_optimum(ctx: _MatchingContext) -> None:
 
     # Double-check that each matching edge actually exists in the graph.
     num_matched_vertex = 0
-    for i in range(num_vertex):
-        if vertex_mate[i] != -1:
+    for x in range(num_vertex):
+        if vertex_mate[x] != -1:
             num_matched_vertex += 1
 
     num_matched_edge = 0
-    for (i, j, _w) in ctx.graph.edges:
-        if vertex_mate[i] == j:
+    for (x, y, _w) in ctx.graph.edges:
+        if vertex_mate[x] == y:
             num_matched_edge += 1
 
     assert num_matched_vertex == 2 * num_matched_edge
@@ -1519,8 +1519,8 @@ def _verify_optimum(ctx: _MatchingContext) -> None:
 
     # Count the number of vertices in each blossom.
     blossom_nvertex = (2 * num_vertex) * [0]
-    for i in range(num_vertex):
-        b = ctx.blossom_parent[i]
+    for x in range(num_vertex):
+        b = ctx.blossom_parent[x]
         while b != -1:
             blossom_nvertex[b] += 1
             b = ctx.blossom_parent[b]
@@ -1529,53 +1529,53 @@ def _verify_optimum(ctx: _MatchingContext) -> None:
     # Also count the number of matched edges in each blossom.
     blossom_nmatched = (2 * num_vertex) * [0]
 
-    for (i, j, w) in ctx.graph.edges:
+    for (x, y, w) in ctx.graph.edges:
 
-        # List blossoms that contain vertex "i".
-        iblossoms = []
-        bi = ctx.blossom_parent[i]
-        while bi != -1:
-            iblossoms.append(bi)
-            bi = ctx.blossom_parent[bi]
+        # List blossoms that contain vertex "x".
+        xblossoms = []
+        bx = ctx.blossom_parent[x]
+        while bx != -1:
+            xblossoms.append(bx)
+            bx = ctx.blossom_parent[bx]
 
-        # List blossoms that contain vertex "j".
-        jblossoms = []
-        bj = ctx.blossom_parent[j]
-        while bj != -1:
-            jblossoms.append(bj)
-            bj = ctx.blossom_parent[bj]
+        # List blossoms that contain vertex "y".
+        yblossoms = []
+        by = ctx.blossom_parent[y]
+        while by != -1:
+            yblossoms.append(by)
+            by = ctx.blossom_parent[by]
 
-        # List blossoms that contain the edge (i, j).
+        # List blossoms that contain the edge (x, y).
         edge_blossoms = []
-        for (bi, bj) in zip(reversed(iblossoms), reversed(jblossoms)):
-            if bi != bj:
+        for (bx, by) in zip(reversed(xblossoms), reversed(yblossoms)):
+            if bx != by:
                 break
-            edge_blossoms.append(bi)
+            edge_blossoms.append(bx)
 
         # Calculate edge slack =
-        #   dual[i] + dual[j] - weight
+        #   dual[x] + dual[y] - weight
         #     + sum(dual[b] for blossoms "b" containing the edge)
         #
         # Multiply weights by 2 to ensure integer values.
-        slack = vertex_dual_var_2x[i] + vertex_dual_var_2x[j] - 2 * w
+        slack = vertex_dual_var_2x[x] + vertex_dual_var_2x[y] - 2 * w
         slack += 2 * sum(blossom_dual_var[b] for b in edge_blossoms)
 
         # Check that all edges have non-negative slack.
         assert slack >= 0
 
         # Check that all matched edges have zero slack.
-        if vertex_mate[i] == j:
+        if vertex_mate[x] == y:
             assert slack == 0
 
         # Update number of matched edges in each blossom.
-        if vertex_mate[i] == j:
+        if vertex_mate[x] == y:
             for b in edge_blossoms:
                 blossom_nmatched[b] += 1
 
     # Check that all unmatched vertices have zero dual.
-    for i in range(num_vertex):
-        if vertex_mate[i] == -1:
-            assert vertex_dual_var_2x[i] == 0
+    for x in range(num_vertex):
+        if vertex_mate[x] == -1:
+            assert vertex_dual_var_2x[x] == 0
 
     # Check that all blossoms with positive dual are "full".
     # A blossom is full if all except one of its vertices are matched

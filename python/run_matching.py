@@ -55,10 +55,10 @@ def read_dimacs_graph(f: TextIO) -> list[tuple[int, int, int|float]]:
             # Handle "edge" line.
             if len(words) != 4:
                 raise ValueError(f"Expecting edge but got {s.strip()!r}")
-            i = int(words[1])
-            j = int(words[2])
+            x = int(words[1])
+            y = int(words[2])
             w = parse_int_or_float(words[3])
-            edges.append((i, j, w))
+            edges.append((x, y, w))
 
         else:
             raise ValueError(f"Unknown line type {words[0]!r}")
@@ -116,9 +116,9 @@ def read_dimacs_matching(
             if len(words) != 3:
                 raise ValueError(
                     f"Expecting matched edge but got {s.strip()}")
-            i = int(words[1])
-            j = int(words[2])
-            pairs.append((i, j))
+            x = int(words[1])
+            y = int(words[2])
+            pairs.append((x, y))
 
         else:
             raise ValueError(f"Unknown line type {words[0]!r}")
@@ -152,8 +152,8 @@ def write_dimacs_matching(
     else:
         print("s", f"{weight:.12g}", file=f)
 
-    for (i, j) in pairs:
-        print("m", i, j, file=f)
+    for (x, y) in pairs:
+        print("m", x, y, file=f)
 
 
 def write_dimacs_matching_file(
@@ -187,8 +187,8 @@ def calc_matching_weight(
                 break
             edge_pos += 1
         assert edge_pos <= len(edges)
-        (i, j, w) = edges[edge_pos]
-        assert pair == (i, j)
+        (x, y, w) = edges[edge_pos]
+        assert pair == (x, y)
         weight += w
         edge_pos += 1
 
