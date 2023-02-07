@@ -1137,6 +1137,44 @@ class _MatchingContext:
         self.blossom[b] = None
         self.unused_blossoms.append(b)
 
+    def expand_blossom_rec(self, b: int, stack: list[int]) -> None:
+        """Expand blossom "b" and recursively expand any sub-blossoms that
+        have dual variable zero.
+
+        Use the stack object instead of making direct recursive calls.
+        """
+
+        num_vertex = self.graph.num_vertex
+
+        blossom = self.blossom[b]
+        assert blossom is not None
+        assert self.blossom_parent[b] == -1
+
+        # Examine sub-blossoms of "b".
+        for sub in blossom.subblossoms:
+
+            # Mark the sub-blossom as a top-level blossom.
+            self.blossom_parent[sub] = -1
+
+            if sub < num_vertex:
+                # Trivial sub-blossom. Mark it as top-level vertex.
+                self.vertex_blossom[sub] = sub
+            else:
+                # Non-trivial sub-blossom.
+                # If its dual variable is zero, expand it recursively.
+                if self.get_blossom(sub).dual_var == 0:
+                    stack.append(sub)
+                else:
+                    # This sub-blossom will not be expanded;
+                    # it now becomes top-level. Update its vertices
+                    # to point to this sub-blossom.
+                    for x in self.blossom_vertices(sub):
+                        self.vertex_blossom[x] = sub
+
+        # Delete the expanded blossom. Recycle its blossom index.
+        self.blossom[b] = None
+        self.unused_blossoms.append(b)
+
     def expand_zero_dual_blossoms(self) -> None:
         """Expand all blossoms with zero dual variable (recursively).
 
@@ -1148,10 +1186,11 @@ class _MatchingContext:
 
         num_vertex = self.graph.num_vertex
 
-# TODO : clean up explicit stack
+        # Use an explicit stack to avoid deep recursion.
+        # The stack contains a list of blossoms to be expanded.
+        stack: list[int] = []
 
         # Find top-level blossoms with zero slack.
-        stack: list[int] = []
         for b in range(num_vertex, 2 * num_vertex):
             blossom = self.blossom[b]
             if (blossom is not None) and (self.blossom_parent[b] == -1):
@@ -1162,40 +1201,75 @@ class _MatchingContext:
                 if blossom.dual_var == 0:
                     stack.append(b)
 
-        # Use an explicit stack to avoid deep recursion.
+        # Expand blossoms.
         while stack:
             b = stack.pop()
+            self.expand_blossom_rec(b, stack)
 
-            # Expand blossom "b".
+    def augment_blossom_rec(
+            self,
+            b: int,
+            sub: int,
+            stack: list[tuple[int, int]]
+            ) -> None:
+        """Augment along an alternating path through blossom "b",
+        from sub-blossom "sub" to the base vertex of the blossom.
 
-            blossom = self.blossom[b]
-            assert blossom is not None
-            assert self.blossom_parent[b] == -1
+        Modify the blossom to reflect that sub-blossom "sub" contains
+        the base vertex after augmenting.
 
-            # Examine sub-blossoms of "b".
-            for sub in blossom.subblossoms:
+        Recursively augment any sub-blossoms on the alternating path,
+        except for sub-blossom "sub" which has already been augmented.
+        Use the stack object instead of making direct recursive calls.
+        """
+        num_vertex = self.graph.num_vertex
 
-                # Mark the sub-blossom as a top-level blossom.
-                self.blossom_parent[sub] = -1
+        blossom = self.blossom[b]
+        assert blossom is not None
 
-                if sub < num_vertex:
-                    # Trivial sub-blossom. Mark it as top-level vertex.
-                    self.vertex_blossom[sub] = sub
-                else:
-                    # Non-trivial sub-blossom.
-                    # If its dual variable is zero, expand it recursively.
-                    if self.get_blossom(sub).dual_var == 0:
-                        stack.append(sub)
-                    else:
-                        # This sub-blossom will not be expanded;
-                        # it now becomes top-level. Update its vertices
-                        # to point to this sub-blossom.
-                        for x in self.blossom_vertices(sub):
-                            self.vertex_blossom[x] = sub
+        # Walk through the expanded blossom from "sub" to the base vertex.
+        (path_nodes, path_edges) = self.find_path_through_blossom(b, sub)
 
-            # Delete the expanded blossom. Recycle its blossom index.
-            self.blossom[b] = None
-            self.unused_blossoms.append(b)
+        for p in range(0, len(path_edges), 2):
+            # Before augmentation:
+            #   path_nodes[p] is matched to path_nodes[p+1]
+            #
+            #   (p) ===== (p+1) ---(i,j)--- (p+2)
+            #
+            # After augmentation:
+            #   path_nodes[p+1] matched to path_nodes[p+2] via edge (i,j)
+            #
+            #   (p) ----- (p+1) ===(i,j)=== (p+2)
+            #
+
+            # Pull the edge (i, j) into the matching.
+            (x, y) = path_edges[p+1]
+            self.vertex_mate[x] = y
+            self.vertex_mate[y] = x
+
+            # Augment through the subblossoms touching the edge (i, j).
+            # Nothing needs to be done for trivial subblossoms.
+            bx = path_nodes[p+1]
+            if bx >= num_vertex:
+                stack.append((bx, x))
+
+            by = path_nodes[p+2]
+            if by >= num_vertex:
+                stack.append((by, y))
+
+        # Rotate the subblossom list so the new base ends up in position 0.
+        p = blossom.subblossoms.index(sub)
+        blossom.subblossoms = (
+            blossom.subblossoms[p:] + blossom.subblossoms[:p])
+        blossom.edges = blossom.edges[p:] + blossom.edges[:p]
+
+        # Update the base vertex.
+        # We can pull this from the sub-blossom where we started since
+        # its augmentation has already finished.
+        if sub < num_vertex:
+            blossom.base_vertex = sub
+        else:
+            blossom.base_vertex = self.get_blossom(sub).base_vertex
 
     def augment_blossom(self, b: int, sub: int) -> None:
         """Augment along an alternating path through blossom "b",
@@ -1203,70 +1277,29 @@ class _MatchingContext:
 
         This function takes time O(n).
         """
-        num_vertex = self.graph.num_vertex
-
-# TODO : cleanup explicit stack
 
         # Use an explicit stack to avoid deep recursion.
         stack = [(b, sub)]
 
         while stack:
-            (top_blossom, sub) = stack.pop()
+            (outer_blossom, sub) = stack.pop()
             b = self.blossom_parent[sub]
 
-            if b != top_blossom:
+            if b != outer_blossom:
+                # Sub-blossom "sub" is an indirect (nested) child of
+                # the blossom we are supposed to be augmenting.
+                #
+                # Blossom "b" is the direct parent of "sub".
+                # Let's first augment "b" from "sub" to its base vertex.
+                # Then continue bay augmenting the parent of "b" from
+                # "b" to its base vertex, and so on until we get to the
+                # outer blossom.
+                #
                 # Set up to continue augmenting through the parent of "b".
-                stack.append((top_blossom, b))
+                stack.append((outer_blossom, b))
 
-            # Augment blossom "b" from subblossom "sub" to the base of the
-            # blossom. Afterwards, "sub" contains the new base vertex.
-
-            blossom = self.blossom[b]
-            assert blossom is not None
-
-            # Walk through the expanded blossom from "sub" to the base vertex.
-            (path_nodes, path_edges) = self.find_path_through_blossom(b, sub)
-
-            for p in range(0, len(path_edges), 2):
-                # Before augmentation:
-                #   path_nodes[p] is matched to path_nodes[p+1]
-                #
-                #   (p) ===== (p+1) ---(i,j)--- (p+2)
-                #
-                # After augmentation:
-                #   path_nodes[p+1] matched to path_nodes[p+2] via edge (i,j)
-                #
-                #   (p) ----- (p+1) ===(i,j)=== (p+2)
-                #
-
-                # Pull the edge (i, j) into the matching.
-                (x, y) = path_edges[p+1]
-                self.vertex_mate[x] = y
-                self.vertex_mate[y] = x
-
-                # Augment through the subblossoms touching the edge (i, j).
-                # Nothing needs to be done for trivial subblossoms.
-                bx = path_nodes[p+1]
-                if bx >= num_vertex:
-                    stack.append((bx, x))
-
-                by = path_nodes[p+2]
-                if by >= num_vertex:
-                    stack.append((by, y))
-
-            # Rotate the subblossom list so the new base ends up in position 0.
-            p = blossom.subblossoms.index(sub)
-            blossom.subblossoms = (
-                blossom.subblossoms[p:] + blossom.subblossoms[:p])
-            blossom.edges = blossom.edges[p:] + blossom.edges[:p]
-
-            # Update the base vertex.
-            # We can pull this from the sub-blossom where we started since
-            # its augmentation has already finished.
-            if sub < num_vertex:
-                blossom.base_vertex = sub
-            else:
-                blossom.base_vertex = self.get_blossom(sub).base_vertex
+            # Augment blossom "b" from "sub" to the base vertex of "b".
+            self.augment_blossom_rec(b, sub, stack)
 
     def augment_matching(self, path: _AlternatingPath) -> None:
         """Augment the matching through the specified augmenting path.
@@ -1440,7 +1473,7 @@ class _MatchingContext:
             # This loop runs through O(m) iterations per stage.
             for e in adjacent_edges[x]:
                 (p, q, _w) = edges[e]
-                y = p if p != x else q  # TODO : consider abstracting this
+                y = p if p != x else q
 
                 # Consider the edge between vertices "x" and "y".
                 # Try to pull this edge into an alternating tree.
