@@ -79,12 +79,10 @@ def maximum_weight_matching(
         (x, y) for (x, y, _w) in edges if ctx.vertex_mate[x] == y]
 
     # Verify that the matching is optimal.
-    # This only works reliably for integer weights.
-    # Verification is a redundant step; if the matching algorithm is correct,
-    # verification will always pass.
+    # This is just a safeguard; the verification will always pass unless
+    # there is a bug in the matching algorithm.
+    # Verification only works reliably for integer weights.
     if graph.integer_weights:
-        # TODO : pass selection of data to verification
-        #        passing the whole context does not inspire trust that this is an independent verification
         _verify_optimum(ctx)
 
     return pairs
@@ -1649,106 +1647,181 @@ class _MatchingContext:
         return (augmenting_path is not None)
 
 
-# TODO : clean up this whole mess
+def _verify_blossom_edges(
+        ctx: _MatchingContext,
+        blossom: _NonTrivialBlossom,
+        edge_slack_2x: list[int|float]
+        ) -> None:
+    """Descend down the blossom tree to find edges that are contained
+    in blossoms.
+
+    Adjust the slack of all contained edges to account for the dual variables
+    of its containing blossoms.
+
+    On the way down, keep track of the sum of dual variables of
+    the containing blossoms.
+
+    On the way up, keep track of the total number of matched edges
+    in the subblossoms. Then check that all blossoms with non-zero
+    dual variable are "full".
+
+    Raises:
+        AssertionError: If a blossom with non-zero dual is not full.
+    """
+
+    num_vertex = ctx.graph.num_vertex
+
+    # For each vertex "x",
+    # "vertex_depth[x]" is the depth of the smallest blossom on
+    # the current descent path that contains "x".
+    vertex_depth: list[int] = num_vertex * [0]
+
+    # Keep track of the sum of blossom duals at each depth along
+    # the current descent path.
+    path_sum_dual: list[int|float] = [0]
+
+    # Keep track of the number of matched edges at each depth along
+    # the current descent path.
+    path_num_matched: list[int] = [0]
+
+    # Use an explicit stack to avoid deep recursion.
+    stack: list[tuple[_NonTrivialBlossom, int]] = [(blossom, -1)]
+
+    while stack:
+        (blossom, p) = stack[-1]
+        depth = len(stack)
+
+        if p == -1:
+            # We just entered this sub-blossom.
+            # Update the depth of all vertices in this sub-blossom.
+            for x in blossom.vertices():
+                vertex_depth[x] = depth
+
+            # Calculate the sub of blossoms at the current depth.
+            path_sum_dual.append(path_sum_dual[-1] + blossom.dual_var)
+
+            # Initialize the number of matched edges at the current depth.
+            path_num_matched.append(0)
+
+            p += 1
+
+        if p < len(blossom.subblossoms):
+            # Update the sub-blossom pointer at the current level.
+            stack[-1] = (blossom, p + 1)
+
+            # Examine the next sub-blossom at the current level.
+            sub = blossom.subblossoms[p]
+            if isinstance(sub, _NonTrivialBlossom):
+                # Prepare to descent into the selected sub-blossom and
+                # scan it recursively.
+                stack.append((sub, -1))
+
+            else:
+                # Handle this trivial sub-blossom.
+                # Scan its adjacent edges and find the smallest blossom
+                # that contains each edge.
+                for e in ctx.graph.adjacent_edges[sub.base_vertex]:
+                    (x, y, _w) = ctx.graph.edges[e]
+
+                    # Only process edges that are ordered out from this
+                    # sub-blossom. This ensures that we process each edge in
+                    # the blossom only once.
+                    if x == sub.base_vertex:
+
+                        edge_depth = vertex_depth[y]
+                        if edge_depth > 0:
+                            # This edge is contained in an ancestor blossom.
+                            # Update its slack.
+                            edge_slack_2x[e] += 2 * path_sum_dual[edge_depth]
+
+                            # Update the number of matched edges in ancestor.
+                            if ctx.vertex_mate[x] == y:
+                                path_num_matched[edge_depth] += 1
+
+        else:
+            # We are now leaving the current sub-blossom.
+
+            # Count the number of vertices inside this blossom.
+            blossom_vertices = blossom.vertices()
+            blossom_num_vertex = len(blossom_vertices)
+
+            # Check that all blossoms with positive dual are "full".
+            # A blossom is full if all except one of its vertices are
+            # matched to another vertex in the blossom.
+            if blossom.dual_var > 0:
+                blossom_num_matched = path_num_matched[depth]
+                assert blossom_num_vertex == 2 * blossom_num_matched + 1
+
+            # Update the number of matched edges in the parent blossom to
+            # take into account the matched edges in this blossom.
+            path_num_matched[depth - 1] += path_num_matched[depth]
+
+            # Revert the depth of the vertices in this sub-blossom.
+            for x in blossom_vertices:
+                vertex_depth[x] = depth - 1
+
+            # Trim the descending path.
+            path_sum_dual.pop()
+            path_num_matched.pop()
+
+            # Remove the current blossom from the stack.
+            # We thus continue our scan of the parent blossom.
+            stack.pop()
+
 
 def _verify_optimum(ctx: _MatchingContext) -> None:
     """Verify that the optimum solution has been found.
 
-    This function takes time O(m * n).
-TODO : really ??
+    This function takes time O(n**2).
 
     Raises:
         AssertionError: If the solution is not optimal.
     """
 
     num_vertex = ctx.graph.num_vertex
+    num_edge = len(ctx.graph.edges)
 
-    vertex_mate = ctx.vertex_mate
-    vertex_dual_var_2x = ctx.vertex_dual_2x
-
-    # Double-check that each matching edge actually exists in the graph.
+    # Double-check that each matched edge actually exists in the graph.
     num_matched_vertex = 0
     for x in range(num_vertex):
-        if vertex_mate[x] != -1:
+        if ctx.vertex_mate[x] != -1:
+            assert ctx.vertex_mate[ctx.vertex_mate[x]] == x
             num_matched_vertex += 1
 
     num_matched_edge = 0
     for (x, y, _w) in ctx.graph.edges:
-        if vertex_mate[x] == y:
+        if ctx.vertex_mate[x] == y:
             num_matched_edge += 1
 
     assert num_matched_vertex == 2 * num_matched_edge
 
     # Check that all dual variables are non-negative.
-    assert min(vertex_dual_var_2x) >= 0
+    assert min(ctx.vertex_dual_2x) >= 0
     for blossom in ctx.nontrivial_blossom:
         assert blossom.dual_var >= 0
 
-    # Count the number of vertices in each blossom.
-    blossom_nvertex = {id(blossom): 0 for blossom in ctx.nontrivial_blossom}
-    for x in range(num_vertex):
-        b = ctx.trivial_blossom[x]
-        while b.parent is not None:
-            b = b.parent
-            blossom_nvertex[id(b)] += 1
+    # Calculate the slack of each edge.
+    # A correction will be needed for edges inside blossoms.
+    edge_slack_2x: list[int|float] = [
+        ctx.vertex_dual_2x[x] + ctx.vertex_dual_2x[y] - 2 * w
+        for (x, y, w) in ctx.graph.edges]
 
-    # Calculate slack of each edge.
-    # Also count the number of matched edges in each blossom.
-    blossom_nmatched = {id(blossom): 0 for blossom in ctx.nontrivial_blossom}
-
-    for (x, y, w) in ctx.graph.edges:
-
-        # List blossoms that contain vertex "x".
-        xblossoms = []
-        bx = ctx.trivial_blossom[x]
-        while bx.parent is not None:
-            bx = bx.parent
-            xblossoms.append(bx)
-
-        # List blossoms that contain vertex "y".
-        yblossoms = []
-        by = ctx.trivial_blossom[y]
-        while by.parent is not None:
-            by = by.parent
-            yblossoms.append(by)
-
-        # List blossoms that contain the edge (x, y).
-        edge_blossoms: list[_NonTrivialBlossom] = []
-        for (bx, by) in zip(reversed(xblossoms), reversed(yblossoms)):
-            if bx is not by:
-                break
-            edge_blossoms.append(bx)
-
-        # Calculate edge slack =
-        #   dual[x] + dual[y] - weight
-        #     + sum(blossom.dual_var for "blossom" containing the edge)
-        #
-        # Multiply weights by 2 to ensure integer values.
-        slack = vertex_dual_var_2x[x] + vertex_dual_var_2x[y] - 2 * w
-        slack += 2 * sum(blossom.dual_var for blossom in edge_blossoms)
-
-        # Check that all edges have non-negative slack.
-        assert slack >= 0
-
-        # Check that all matched edges have zero slack.
-        if vertex_mate[x] == y:
-            assert slack == 0
-
-        # Update number of matched edges in each blossom.
-        if vertex_mate[x] == y:
-            for b in edge_blossoms:
-                blossom_nmatched[id(b)] += 1
-
-    # Check that all unmatched vertices have zero dual.
-    for x in range(num_vertex):
-        if vertex_mate[x] == -1:
-            assert vertex_dual_var_2x[x] == 0
-
-    # Check that all blossoms with positive dual are "full".
-    # A blossom is full if all except one of its vertices are matched
-    # to another vertex in the same blossom.
+    # Descend down each top-level blossom.
+    # Adjust edge slacks to account for the duals of its containing blossoms.
+    # And check that blossoms with non-zero dual are full.
+    # This takes total time O(n**2).
     for blossom in ctx.nontrivial_blossom:
-        if blossom.dual_var > 0:
-            assert blossom_nvertex[id(blossom)] == 2 * blossom_nmatched[id(blossom)] + 1
+        if blossom.parent is None:
+            _verify_blossom_edges(ctx, blossom, edge_slack_2x)
+
+    # We now know the correct slack of each edge.
+    # Check that all edges have non-negative slack.
+    assert min(edge_slack_2x) >= 0
+
+    # Check that all matched edges have zero slack.
+    for e in range(num_edge):
+        (x, y, _w) = ctx.graph.edges[e]
+        if ctx.vertex_mate[x] == y:
+            assert edge_slack_2x[e] == 0
 
     # Optimum solution confirmed.
