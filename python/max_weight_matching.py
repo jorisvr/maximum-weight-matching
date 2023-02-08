@@ -840,18 +840,17 @@ class _MatchingContext:
 
         # "xedges" is a list of edges used while tracing from "x".
         # "yedges" is a list of edges used while tracing from "y".
-        xedges: list[tuple[int, int]] = []
-        yedges: list[tuple[int, int]] = []
+        # Pre-load the edge (x, y) on both lists.
+        xedges: list[tuple[int, int]] = [(x, y)]
+        yedges: list[tuple[int, int]] = [(y, x)]
 
-        # Pre-load the edge between "x" and "y" so it will end up in the right
-        # place in the final path.
-        xedges.append((x, y))
+        # "first_common" is the first common ancestor of "x" and "y"
+        # in the alternating tree, or None if there is no common ancestor.
+        first_common: Optional[_Blossom] = None
 
         # Alternate between tracing the path from "x" and the path from "y".
         # This ensures that the search time is bounded by the size of the
         # newly found blossom.
-# TODO : this code is a bit shady; maybe reconsider the swapping trick
-        first_common: Optional[_Blossom] = None
         while x != -1 or y != -1:
 
             # Check if we found a common ancestor.
@@ -882,17 +881,16 @@ class _MatchingContext:
             b.marker = False
 
         # If we found a common ancestor, trim the paths so they end there.
-# TODO : also this is just plain ugly - try to rework
         if first_common is not None:
             assert self.vertex_top_blossom[xedges[-1][0]] is first_common
-            while yedges and (self.vertex_top_blossom[yedges[-1][0]]
-                              is not first_common):
+            while self.vertex_top_blossom[yedges[-1][0]] is not first_common:
                 yedges.pop()
 
         # Fuse the two paths.
-        # Flip the order of one path and the edge tuples in the other path
-        # to obtain a continuous path with correctly ordered edge tuples.
-        path_edges = xedges[::-1] + [(y, x) for (x, y) in yedges]
+        # Flip the order of one path, and flip the edge tuples in the other
+        # path to obtain a continuous path with correctly ordered edge tuples.
+        # Skip the duplicate edge in one of the paths.
+        path_edges = xedges[::-1] + [(y, x) for (x, y) in yedges[1:]]
 
         # Any S-to-S alternating path must have odd length.
         assert len(path_edges) % 2 == 1
