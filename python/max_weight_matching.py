@@ -644,7 +644,8 @@ class _MatchingContext:
 
         return (best_index, best_slack)
 
-    def lset_new_blossom(self, blossom: _Blossom) -> None:
+    @staticmethod
+    def lset_new_blossom(blossom: _Blossom) -> None:
         """Start tracking edges for a new S-blossom."""
         assert blossom.best_edge == -1
         if isinstance(blossom, _NonTrivialBlossom):
@@ -959,8 +960,8 @@ class _MatchingContext:
         # Merge least-slack edges for the S-sub-blossoms.
         self.lset_merge_blossoms(blossom)
 
+    @staticmethod
     def find_path_through_blossom(
-            self,
             blossom: _NonTrivialBlossom,
             sub: _Blossom
             ) -> tuple[list[_Blossom], list[tuple[int, int]]]:
