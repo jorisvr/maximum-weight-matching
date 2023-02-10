@@ -700,7 +700,6 @@ class _MatchingContext:
         # Build a temporary array holding the least-slack edge index to
         # each top-level S-blossom. This array is indexed by the base vertex
         # of the blossoms.
-# TODO : consider using pre-allocated arrays for this purpose
         best_edge_to_blossom: list[int] = num_vertex * [-1]
         zero_slack: int|float = 0
         best_slack_to_blossom: list[int|float] = num_vertex * [zero_slack]
@@ -782,7 +781,6 @@ class _MatchingContext:
         best_index = -1
         best_slack: int|float = 0
 
-# TODO : do we really want to split trivial/nontrivial blossoms ?
         for blossom in self.trivial_blossom + self.nontrivial_blossom:
             if (blossom.label == _LABEL_S) and (blossom.parent is None):
                 e = blossom.best_edge
@@ -1034,10 +1032,8 @@ class _MatchingContext:
 
         # Find the sub-blossom that is attached to the parent node in
         # the alternating tree.
-# TODO : uglyness with the assertion
-        entry_link = blossom.tree_edge
-        assert entry_link is not None
-        (x, y) = entry_link
+        assert blossom.tree_edge is not None
+        (x, y) = blossom.tree_edge
         sub = self.vertex_top_blossom[y]
 
         # Assign label T to that sub-blossom.
