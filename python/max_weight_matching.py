@@ -379,6 +379,7 @@ class _Blossom:
         # "marker" is a temporary variable used to discover common
         # ancestors in the blossom tree. It is normally False, except
         # when used by "trace_alternating_paths()".
+        # It is also used by "expand_zero_dual_blossoms()".
         self.marker: bool = False
 
     def vertices(self) -> list[int]:
@@ -927,7 +928,6 @@ class _MatchingContext:
         blossom = _NonTrivialBlossom(subblossoms, path.edges)
 
         # Insert into the blossom array.
-# TODO : rework this
         self.nontrivial_blossom.append(blossom)
 
         # Link the subblossoms to the their new parent.
@@ -1065,7 +1065,6 @@ class _MatchingContext:
             sub.tree_edge = path_edges[p+1]
 
         # Delete the expanded blossom.
-# TODO : avoid O(n) here if possible
         self.nontrivial_blossom.remove(blossom)
 
     def expand_blossom_rec(
@@ -1102,9 +1101,8 @@ class _MatchingContext:
                 # Trivial sub-blossom. Mark it as top-level vertex.
                 self.vertex_top_blossom[sub.base_vertex] = sub
 
-        # Delete the expanded blossom.
-# TODO : avoid O(n) here if possible
-        self.nontrivial_blossom.remove(blossom)
+        # Deletion of the expanded blossom will be handled in
+        # the function "expand_zero_dual_blossoms()".
 
     def expand_zero_dual_blossoms(self) -> None:
         """Expand all blossoms with zero dual variable (recursively).
@@ -1129,10 +1127,30 @@ class _MatchingContext:
                 if blossom.dual_var == 0:
                     stack.append(blossom)
 
+        # Skip the rest of this function if there are no blossoms to delete.
+        if not stack:
+            return
+
         # Expand blossoms.
         while stack:
             blossom = stack.pop()
             self.expand_blossom_rec(blossom, stack)
+
+            # Mark the blossom for deletion.
+            blossom.marker = True
+
+        # Delete the expanded blossoms.
+        # We do this in one pass over the array to ensure O(n) time.
+        p = 0
+        for (i, blossom) in enumerate(self.nontrivial_blossom):
+            if not blossom.marker:
+                # Keep this blossom.
+                if i > p:
+                    self.nontrivial_blossom[p] = blossom
+                p += 1
+
+        # Trim the array.
+        del self.nontrivial_blossom[p:]
 
     #
     # Augmenting:
