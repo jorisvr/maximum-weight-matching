@@ -935,10 +935,6 @@ class _MatchingContext:
             sub.parent = blossom
 
         # Update blossom-membership of all vertices in the new blossom.
-        # NOTE: This step takes O(n) time per blossom formation, and adds up
-        #       to O(n**2) total time per stage.
-        #       This could be improved through a union-find datastructure, or
-        #       by re-using the blossom index of the largest sub-blossom.
         for x in blossom.vertices():
             self.vertex_top_blossom[x] = blossom
 
