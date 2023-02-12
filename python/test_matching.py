@@ -2,11 +2,12 @@
 
 import math
 import unittest
+from unittest.mock import Mock
 
+import max_weight_matching
 from max_weight_matching import (
     maximum_weight_matching as mwm,
-    adjust_weights_for_maximum_cardinality_matching as adj,
-    _GraphInfo)
+    adjust_weights_for_maximum_cardinality_matching as adj)
 
 
 class TestMaximumWeightMatching(unittest.TestCase):
@@ -267,10 +268,148 @@ class TestGraphInfo(unittest.TestCase):
     """Test _GraphInfo helper class."""
 
     def test_empty(self):
-        graph = _GraphInfo([])
+        graph = max_weight_matching._GraphInfo([])
         self.assertEqual(graph.num_vertex, 0)
         self.assertEqual(graph.edges, [])
         self.assertEqual(graph.adjacent_edges, [])
+
+
+class TestVerificationFail(unittest.TestCase):
+    """Test failure handling in verification routine."""
+
+    def _make_context(
+            self,
+            edges,
+            vertex_mate,
+            vertex_dual_2x,
+            nontrivial_blossom):
+        ctx = Mock(spec=max_weight_matching._MatchingContext)
+        ctx.graph = max_weight_matching._GraphInfo(edges)
+        ctx.vertex_mate = vertex_mate
+        ctx.vertex_dual_2x = vertex_dual_2x
+        ctx.nontrivial_blossom = nontrivial_blossom
+        return ctx
+
+    def test_success(self):
+        edges = [(0,1,10), (1,2,11)]
+        ctx = self._make_context(
+            edges,
+            vertex_mate=[-1, 2, 1],
+            vertex_dual_2x=[0, 20, 2],
+            nontrivial_blossom=[])
+        max_weight_matching._verify_optimum(ctx)
+
+    def test_asymmetric_matching(self):
+        edges = [(0,1,10), (1,2,11)]
+        ctx = self._make_context(
+            edges,
+            vertex_mate=[-1, 2, 0],
+            vertex_dual_2x=[0, 20, 2],
+            nontrivial_blossom=[])
+        with self.assertRaises(max_weight_matching.MatchingError):
+            max_weight_matching._verify_optimum(ctx)
+
+    def test_nonexistent_matched_edge(self):
+        edges = [(0,1,10), (1,2,11)]
+        ctx = self._make_context(
+            edges,
+            vertex_mate=[2, -1, 0],
+            vertex_dual_2x=[11, 11, 11],
+            nontrivial_blossom=[])
+        with self.assertRaises(max_weight_matching.MatchingError):
+            max_weight_matching._verify_optimum(ctx)
+
+    def test_negative_vertex_dual(self):
+        edges = [(0,1,10), (1,2,11)]
+        ctx = self._make_context(
+            edges,
+            vertex_mate=[-1, 2, 1],
+            vertex_dual_2x=[-2, 22, 0],
+            nontrivial_blossom=[])
+        with self.assertRaises(max_weight_matching.MatchingError):
+            max_weight_matching._verify_optimum(ctx)
+
+    def test_unmatched_nonzero_dual(self):
+        edges = [(0,1,10), (1,2,11)]
+        ctx = self._make_context(
+            edges,
+            vertex_mate=[-1, 2, 1],
+            vertex_dual_2x=[9, 11, 11],
+            nontrivial_blossom=[])
+        with self.assertRaises(max_weight_matching.MatchingError):
+            max_weight_matching._verify_optimum(ctx)
+
+    def test_negative_edge_slack(self):
+        edges = [(0,1,10), (1,2,11)]
+        ctx = self._make_context(
+            edges,
+            vertex_mate=[-1, 2, 1],
+            vertex_dual_2x=[0, 11, 11],
+            nontrivial_blossom=[])
+        with self.assertRaises(max_weight_matching.MatchingError):
+            max_weight_matching._verify_optimum(ctx)
+
+    def test_matched_edge_slack(self):
+        edges = [(0,1,10), (1,2,11)]
+        ctx = self._make_context(
+            edges,
+            vertex_mate=[-1, 2, 1],
+            vertex_dual_2x=[0, 20, 11],
+            nontrivial_blossom=[])
+        with self.assertRaises(max_weight_matching.MatchingError):
+            max_weight_matching._verify_optimum(ctx)
+
+    def test_negative_blossom_dual(self):
+        #
+        # [0]--7--[1]--9--[2]--6--[3]
+        #   \            /
+        #    \----8-----/
+        #
+        edges = [(0,1,7), (0,2,8), (1,2,9), (2,3,6)]
+        blossom = max_weight_matching._NonTrivialBlossom(
+            subblossoms=[
+                max_weight_matching._Blossom(0),
+                max_weight_matching._Blossom(1),
+                max_weight_matching._Blossom(2)],
+            edges=[0,2,1])
+        for sub in blossom.subblossoms:
+            sub.parent = blossom
+        blossom.dual_var = -1
+        ctx = self._make_context(
+            edges,
+            vertex_mate=[1, 0, 3, 2],
+            vertex_dual_2x=[4, 6, 8, 4],
+            nontrivial_blossom=[blossom])
+        with self.assertRaises(max_weight_matching.MatchingError):
+            max_weight_matching._verify_optimum(ctx)
+
+    def test_blossom_not_full(self):
+        #
+        # [3]     [4]
+        #  |       |
+        #  8       8
+        #  |       |
+        # [0]--7--[1]--5--[2]
+        #   \            /
+        #    \----2-----/
+        #
+        edges = [(0,1,7), (0,2,2), (1,2,5), (0,3,8), (1,4,8)]
+        blossom = max_weight_matching._NonTrivialBlossom(
+            subblossoms=[
+                max_weight_matching._Blossom(0),
+                max_weight_matching._Blossom(1),
+                max_weight_matching._Blossom(2)],
+            edges=[0,2,1])
+        for sub in blossom.subblossoms:
+            sub.parent = blossom
+        blossom.dual_var = 2
+        ctx = self._make_context(
+            edges,
+            vertex_mate=[3, 4, -1, 0, 1],
+            vertex_dual_2x=[4, 10, 0, 12, 6],
+            nontrivial_blossom=[blossom])
+        with self.assertRaises(max_weight_matching.MatchingError):
+            max_weight_matching._verify_optimum(ctx)
 
 
 if __name__ == "__main__":
