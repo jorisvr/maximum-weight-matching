@@ -1,10 +1,12 @@
 """Unit tests for maximum weight matching."""
 
+import math
 import unittest
 
 from max_weight_matching import (
     maximum_weight_matching as mwm,
-    adjust_weights_for_maximum_cardinality_matching as adj)
+    adjust_weights_for_maximum_cardinality_matching as adj,
+    _GraphInfo)
 
 
 class TestMaximumWeightMatching(unittest.TestCase):
@@ -128,9 +130,74 @@ class TestMaximumWeightMatching(unittest.TestCase):
             mwm([(1,2,40), (1,3,40), (2,3,60), (2,4,55), (3,5,55), (4,5,50), (1,8,15), (5,7,30), (7,6,10), (8,10,10), (4,9,30)]),
             [(1,2), (3,5), (7,6), (8,10), (4,9)])
 
+    def test41_nonmax_card(self):
+        """leave some nodes unmatched"""
+        self.assertEqual(
+            mwm([(0,1,2), (0,4,3), (1,2,7), (1,5,2), (2,3,9), (2,5,4), (3,4,8), (3,5,4)]),
+            [(1,2), (3,4)])
+
+    def test42_s_nest_partial_expand(self):
+        """create nested S-blossom, augment, expand only outer"""
+        #
+        #    [0]--8--[1]--6--[3]--5--[5]
+        #      \      |       |
+        #       \     9       8
+        #        8    |       |
+        #         \--[2]--7--[4]
+        #
+        self.assertEqual(
+            mwm([(0,1,8), (0,2,8), (1,2,9), (1,3,6), (2,4,7), (3,4,8), (3,5,5)]),
+            [(0,1), (2,4), (3,5)])
+
+    def test43_s_nest_noexpand(self):
+        """leave nested S-blossom with inner zero dual"""
+        #
+        #    [1]--9--[2]
+        #     |      /
+        #     7  ___7
+        #     | /
+        #    [0]        [5]--2--[6]
+        #     | \___
+        #     7     7
+        #     |      \
+        #    [3]--9--[4]
+        #
+        self.assertEqual(
+            mwm([(0,1,7), (0,2,7), (1,2,9), (0,3,7), (0,4,7), (3,4,9), (5,6,2)]),
+            [(1,2), (3,4), (5,6)])
+
+    def test_fail_bad_input(self):
+        """bad input values"""
+        with self.assertRaises(TypeError):
+            mwm(15)
+        with self.assertRaises(TypeError):
+            mwm([15])
+        with self.assertRaises((TypeError, ValueError)):
+            mwm([(1,2)])
+        with self.assertRaises(TypeError):
+            mwm([(1.1, 2.5, 3)])
+        with self.assertRaises(ValueError):
+            mwm([(1, -2, 3)])
+        with self.assertRaises(TypeError):
+            mwm([(1, 2, "3")])
+        with self.assertRaises(ValueError):
+            mwm([(1, 2, math.inf)])
+        with self.assertRaises(ValueError):
+            mwm([(1, 2, 1e308)])
+
+    def test_fail_bad_graph(self):
+        """bad input graph structure"""
+        with self.assertRaises(ValueError):
+            mwm([(0, 1, 2), (1, 1, 1)])
+        with self.assertRaises(ValueError):
+            mwm([(0, 1, 2), (1, 2, 1), (2, 1, 1)])
+
 
 class TestAdjustWeightForMaxCardinality(unittest.TestCase):
     """Test adjust_weights_for_maximum_cardinality_matching() function."""
+
+    def test_empty(self):
+        self.assertEqual(adj([]), [])
 
     def test_chain(self):
         self.assertEqual(
@@ -141,6 +208,11 @@ class TestAdjustWeightForMaxCardinality(unittest.TestCase):
         self.assertEqual(
             adj([(0,1,65), (1,2,71), (2,3,66), (3,4,72), (4,5,64), (5,6,70), (6,7,67)]),
             [(0,1,65), (1,2,71), (2,3,66), (3,4,72), (4,5,64), (5,6,70), (6,7,67)])
+
+    def test_flat(self):
+        self.assertEqual(
+            adj([(0,1,0), (0,4,0), (1,2,0), (1,5,0), (2,3,0), (2,5,0), (3,4,0), (3,5,0)]),
+            [(0,1,1), (0,4,1), (1,2,1), (1,5,1), (2,3,1), (2,5,1), (3,4,1), (3,5,1)])
 
     def test14_maxcard(self):
         self.assertEqual(
@@ -167,6 +239,26 @@ class TestMaximumCardinalityMatching(unittest.TestCase):
         self.assertEqual(
             mwm(adj([(1,2,2), (1,3,-2), (2,3,1), (2,4,-1), (3,4,-6)])),
             [(1,3), (2,4)])
+
+    def test43_maxcard(self):
+        """maximum cardinality"""
+        self.assertIn(
+            mwm(adj([(0,1,2), (0,4,3), (1,2,7), (1,5,2), (2,3,9), (2,5,4), (3,4,8), (3,5,4)])),
+            ([(0,1), (2,5), (3,4)],
+             [(0,4), (1,2), (3,5)]))
+
+
+class TestGraphInfo(unittest.TestCase):
+    """Test _GraphInfo helper class."""
+
+    # This is just to get 100% test coverage.
+    # This is _not_ intended as a real test of the _GraphInfo class.
+
+    def test_empty(self):
+        graph = _GraphInfo([])
+        self.assertEqual(graph.num_vertex, 0)
+        self.assertEqual(graph.edges, [])
+        self.assertEqual(graph.adjacent_edges, [])
 
 
 if __name__ == "__main__":
