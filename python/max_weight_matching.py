@@ -45,6 +45,8 @@ def maximum_weight_matching(
     Raises:
         ValueError: If the input does not satisfy the constraints.
         TypeError: If the input contains invalid data types.
+        MatchingError: If the matching algorithm fails.
+            This can only happen if there is a bug in the algorithm.
     """
 
     # Check that the input meets all constraints.
@@ -169,6 +171,14 @@ def adjust_weights_for_maximum_cardinality_matching(
 
     # Increase all edge weights by "delta".
     return [(x, y, w + delta) for (x, y, w) in edges]
+
+
+class MatchingError(Exception):
+    """Raised when verification of the matching fails.
+
+    This can only happen if there is a bug in the algorithm.
+    """
+    pass
 
 
 def _check_input_types(edges: list[tuple[int, int, int|float]]) -> None:
@@ -1669,7 +1679,7 @@ def _verify_blossom_edges(
     dual variable are "full".
 
     Raises:
-        AssertionError: If a blossom with non-zero dual is not full.
+        MatchingError: If a blossom with non-zero dual is not full.
     """
 
     num_vertex = ctx.graph.num_vertex
@@ -1753,7 +1763,12 @@ def _verify_blossom_edges(
             # matched to another vertex in the blossom.
             if blossom.dual_var > 0:
                 blossom_num_matched = path_num_matched[depth]
-                assert blossom_num_vertex == 2 * blossom_num_matched + 1
+                if blossom_num_vertex != 2 * blossom_num_matched + 1:
+                    raise MatchingError(
+                        "Verification failed:"
+                        f" blossom with dual={blossom.dual_var}"
+                        f" nvertex={blossom_num_vertex}"
+                        f" nmatched={blossom_num_matched}")
 
             # Update the number of matched edges in the parent blossom to
             # take into account the matched edges in this blossom.
@@ -1778,17 +1793,21 @@ def _verify_optimum(ctx: _MatchingContext) -> None:
     This function takes time O(n**2).
 
     Raises:
-        AssertionError: If the solution is not optimal.
+        MatchingError: If the solution is not optimal.
     """
 
     num_vertex = ctx.graph.num_vertex
     num_edge = len(ctx.graph.edges)
 
-    # Double-check that each matched edge actually exists in the graph.
+    # Check that each matched edge actually exists in the graph.
     num_matched_vertex = 0
     for x in range(num_vertex):
-        if ctx.vertex_mate[x] != -1:
-            assert ctx.vertex_mate[ctx.vertex_mate[x]] == x
+        y = ctx.vertex_mate[x]
+        if y != -1:
+            if ctx.vertex_mate[y] != x:
+                raise MatchingError(
+                    "Verification failed:"
+                    f" asymmetric match of vertex {x} and {y}")
             num_matched_vertex += 1
 
     num_matched_edge = 0
@@ -1796,12 +1815,17 @@ def _verify_optimum(ctx: _MatchingContext) -> None:
         if ctx.vertex_mate[x] == y:
             num_matched_edge += 1
 
-    assert num_matched_vertex == 2 * num_matched_edge
+    if num_matched_vertex != 2 * num_matched_edge:
+        raise MatchingError(
+            f"Verification failed: {num_matched_vertex} matched vertices"
+            f" inconsistent with {num_matched_edge} matched edges")
 
     # Check that all dual variables are non-negative.
     assert min(ctx.vertex_dual_2x) >= 0
     for blossom in ctx.nontrivial_blossom:
-        assert blossom.dual_var >= 0
+        if blossom.dual_var < 0:
+            raise MatchingError("Verification failed:"
+                                f" negative blossom dual {blossom.dual_var}")
 
     # Calculate the slack of each edge.
     # A correction will be needed for edges inside blossoms.
@@ -1819,12 +1843,17 @@ def _verify_optimum(ctx: _MatchingContext) -> None:
 
     # We now know the correct slack of each edge.
     # Check that all edges have non-negative slack.
-    assert min(edge_slack_2x) >= 0
+    min_edge_slack = min(edge_slack_2x)
+    if min_edge_slack < 0:
+        raise MatchingError(
+            f"Verification failed: negative edge slack {min_edge_slack/2}")
 
     # Check that all matched edges have zero slack.
     for e in range(num_edge):
         (x, y, _w) = ctx.graph.edges[e]
-        if ctx.vertex_mate[x] == y:
-            assert edge_slack_2x[e] == 0
+        if ctx.vertex_mate[x] == y and edge_slack_2x[e] != 0:
+            raise MatchingError(
+                "Verification failed:"
+                f" matched edge ({x}, {y}) has slack {edge_slack_2x[e]/2}")
 
     # Optimum solution confirmed.
