@@ -1758,17 +1758,16 @@ def _verify_blossom_edges(
             blossom_vertices = blossom.vertices()
             blossom_num_vertex = len(blossom_vertices)
 
-            # Check that all blossoms with positive dual are "full".
+            # Check that all blossoms are "full".
             # A blossom is full if all except one of its vertices are
             # matched to another vertex in the blossom.
-            if blossom.dual_var > 0:
-                blossom_num_matched = path_num_matched[depth]
-                if blossom_num_vertex != 2 * blossom_num_matched + 1:
-                    raise MatchingError(
-                        "Verification failed:"
-                        f" blossom with dual={blossom.dual_var}"
-                        f" nvertex={blossom_num_vertex}"
-                        f" nmatched={blossom_num_matched}")
+            blossom_num_matched = path_num_matched[depth]
+            if blossom_num_vertex != 2 * blossom_num_matched + 1:
+                raise MatchingError(
+                    "Verification failed: blossom non-full"
+                    f" dual={blossom.dual_var}"
+                    f" nvertex={blossom_num_vertex}"
+                    f" nmatched={blossom_num_matched}")
 
             # Update the number of matched edges in the parent blossom to
             # take into account the matched edges in this blossom.
@@ -1821,11 +1820,23 @@ def _verify_optimum(ctx: _MatchingContext) -> None:
             f" inconsistent with {num_matched_edge} matched edges")
 
     # Check that all dual variables are non-negative.
-    assert min(ctx.vertex_dual_2x) >= 0
+    for x in range(num_vertex):
+        if ctx.vertex_dual_2x[x] < 0:
+            raise MatchingError(
+                "Verification failed:"
+                f" vertex {x} has negative dual {ctx.vertex_dual_2x[x]/2}")
+
     for blossom in ctx.nontrivial_blossom:
         if blossom.dual_var < 0:
             raise MatchingError("Verification failed:"
                                 f" negative blossom dual {blossom.dual_var}")
+
+    # Check that all unmatched vertices have zero dual.
+    for x in range(num_vertex):
+        if ctx.vertex_mate[x] == -1 and ctx.vertex_dual_2x[x] != 0:
+            raise MatchingError(
+                f"Verification failed: Unmatched vertex {x}"
+                f" has non-zero dual {ctx.vertex_dual_2x[x]/2}")
 
     # Calculate the slack of each edge.
     # A correction will be needed for edges inside blossoms.
@@ -1835,7 +1846,7 @@ def _verify_optimum(ctx: _MatchingContext) -> None:
 
     # Descend down each top-level blossom.
     # Adjust edge slacks to account for the duals of its containing blossoms.
-    # And check that blossoms with non-zero dual are full.
+    # And check that all blossoms are full.
     # This takes total time O(n**2).
     for blossom in ctx.nontrivial_blossom:
         if blossom.parent is None:
