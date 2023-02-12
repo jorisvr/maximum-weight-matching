@@ -166,6 +166,21 @@ class TestMaximumWeightMatching(unittest.TestCase):
             mwm([(0,1,7), (0,2,7), (1,2,9), (0,3,7), (0,4,7), (3,4,9), (5,6,2)]),
             [(1,2), (3,4), (5,6)])
 
+    def test44_blossom_redundant_edge(self):
+        """drop redundant edge while making a blossom"""
+        #
+        #         [1]----9---[2]
+        #        /            | \
+        #       7             8  \
+        #      /              |   1
+        #    [0]--6--[4]--9--[3]   |
+        #              \           |
+        #               \----1----[5]
+        #
+        self.assertEqual(
+            mwm([(0,1,7), (0,4,6), (1,2,9), (2,3,8), (3,4,9), (2,5,1), (4,5,1)]),
+            [(1,2), (3,4)])
+
     def test_fail_bad_input(self):
         """bad input values"""
         with self.assertRaises(TypeError):
@@ -250,9 +265,6 @@ class TestMaximumCardinalityMatching(unittest.TestCase):
 
 class TestGraphInfo(unittest.TestCase):
     """Test _GraphInfo helper class."""
-
-    # This is just to get 100% test coverage.
-    # This is _not_ intended as a real test of the _GraphInfo class.
 
     def test_empty(self):
         graph = _GraphInfo([])
