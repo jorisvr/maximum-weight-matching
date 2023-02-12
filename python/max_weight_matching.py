@@ -1137,16 +1137,9 @@ class _MatchingContext:
 
         # Delete the expanded blossoms.
         # We do this in one pass over the array to ensure O(n) time.
-        p = 0
-        for (i, blossom) in enumerate(self.nontrivial_blossom):
-            if not blossom.marker:
-                # Keep this blossom.
-                if i > p:
-                    self.nontrivial_blossom[p] = blossom
-                p += 1
-
-        # Trim the array.
-        del self.nontrivial_blossom[p:]
+        self.nontrivial_blossom = [blossom
+                                   for blossom in self.nontrivial_blossom
+                                   if not blossom.marker]
 
     #
     # Augmenting:
