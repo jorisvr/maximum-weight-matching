@@ -100,9 +100,6 @@ def adjust_weights_for_maximum_cardinality_matching(
 
     The graph is specified as a list of edges, each edge specified as a tuple
     of its two vertices and the edge weight.
-
-    Vertices are indexed by consecutive, non-negative integers, such that
-    the first vertex has index 0 and the last vertex has index (n-1).
     Edge weights may be integers or floating point numbers.
     Negative edge weights are allowed.
 
@@ -112,11 +109,11 @@ def adjust_weights_for_maximum_cardinality_matching(
      - The minimum edge weight is at least "n" times the difference between
        maximum and minimum edge weight.
 
-    These conditions ensure that a maximum-cardinality matching will be found:
-    The weight of any non-maximum-cardinality matching can be increased by
-    matching an additional edge, even if the new edge has minimum edge weight
-    and causes all other matched edges to degrade from maximum to minimum
-    edge weight.
+    These conditions ensure that a maximum-cardinality matching will be found.
+    Proof: The weight of any non-maximum-cardinality matching can be increased
+    by matching an additional edge, even if the new edge has minimum edge
+    weight and causes all other matched edges to degrade from maximum to
+    minimum edge weight.
 
     Since we are only considering maximum-cardinality matchings, increasing
     all edge weights by an equal amount will not change the set of edges
