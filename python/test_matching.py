@@ -209,6 +209,78 @@ class TestMaximumWeightMatching(unittest.TestCase):
             mwm([(0, 1, 2), (1, 2, 1), (2, 1, 1)])
 
 
+class TestCornerCases(unittest.TestCase):
+    """Test cases that would catch certain errors in the algorithm.
+
+    These graphs were generated semi-automatically to fail when
+    specific bugs are introduced in the code.
+    """
+
+    def test1(self):
+        pairs = mwm([(0,4,26), (1,3,31), (1,4,49)])
+        self.assertEqual(pairs, [(0,4), (1,3)])
+
+    def test2(self):
+        pairs = mwm([(0,2,42), (0,4,36), (2,3,26)])
+        self.assertEqual(pairs, [(0,4), (2,3)])
+
+    def test3(self):
+        pairs = mwm([(0,4,43), (1,4,28), (2,4,38)])
+        self.assertEqual(pairs, [(0,4)])
+
+    def test4(self):
+        pairs = mwm([(0,1,50), (0,3,46), (0,4,45)])
+        self.assertEqual(pairs, [(0,1)])
+
+    def test5(self):
+        pairs = mwm([(0,1,35), (0,3,36), (0,4,46)])
+        self.assertEqual(pairs, [(0,4)])
+
+    def test6(self):
+        pairs = mwm([(0,1,50), (0,4,51), (0,5,34), (1,2,43), (1,4,57), (2,5,47), (3,4,17)])
+        self.assertEqual(pairs, [(0,1), (2,5), (3,4)])
+
+    def test7(self):
+        pairs = mwm([(0,1,34), (0,3,19), (1,2,45), (1,3,30), (1,4,37), (2,4,36)])
+        self.assertEqual(pairs, [(0,1), (2,4)])
+
+    def test8(self):
+        pairs = mwm([(0,1,48), (0,3,42), (0,4,57), (1,3,51), (1,5,36), (2,3,23), (4,5,46)])
+        self.assertEqual(pairs, [(0,1), (2,3), (4,5)])
+
+    def test9(self):
+        pairs = mwm([(0,1,21), (0,2,25), (0,5,42), (1,4,40), (2,3,10), (2,5,40), (3,5,31), (4,5,58)])
+        self.assertEqual(pairs, [(0,2), (1,4), (3,5)])
+
+    def test10(self):
+        pairs = mwm([(0,2,7), (0,5,20), (1,2,50), (1,4,46), (2,3,35), (2,4,8), (2,5,25), (3,5,47)])
+        self.assertEqual(pairs, [(0,5), (1,4), (2,3)])
+
+    def test11(self):
+        pairs = mwm([(0,1,42), (0,2,60), (1,3,34), (1,4,58), (1,5,52), (2,5,60), (3,5,34), (4,5,57)])
+        self.assertEqual(pairs, [(0,2), (1,4), (3,5)])
+
+    def test12(self):
+        pairs = mwm([(0,1,23), (0,2,26), (0,3,22), (0,4,41), (2,4,36)])
+        self.assertEqual(pairs, [(0,1), (2,4)])
+
+    def test13(self):
+        pairs = mwm([(0,3,58), (0,4,49), (1,5,34), (2,3,22), (2,5,42), (4,5,36)])
+        self.assertEqual(pairs, [(0,4), (1,5), (2,3)])
+
+    def test14(self):
+        pairs = mwm([(0,1,29), (0,3,35), (0,4,42), (1,2,12), (2,4,29), (3,4,44)])
+        self.assertEqual(pairs, [(0,1), (3,4)])
+
+    def test15(self):
+        pairs = mwm([(0,4,53), (0,5,42), (1,4,45), (2,4,59), (2,6,39), (4,5,69), (4,6,52)])
+        self.assertEqual(pairs, [(0,5), (1,4), (2,6)])
+
+    def test16(self):
+        pairs = mwm([(0,2,13), (1,2,11), (2,3,39), (2,4,17), (3,4,35)])
+        self.assertEqual(pairs, [(0,2), (3,4)])
+
+
 class TestAdjustWeightForMaxCardinality(unittest.TestCase):
     """Test adjust_weights_for_maximum_cardinality_matching() function."""
 
