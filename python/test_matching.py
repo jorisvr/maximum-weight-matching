@@ -182,6 +182,15 @@ class TestMaximumWeightMatching(unittest.TestCase):
             mwm([(0,1,7), (0,4,6), (1,2,9), (2,3,8), (3,4,9), (2,5,1), (4,5,1)]),
             [(1,2), (3,4)])
 
+    def test45_flip_order(self):
+        """test that order of edges and vertices is irrelevant"""
+        edges = [(0,1,2), (0,4,3), (1,2,7), (1,5,1), (2,3,9), (2,5,4), (3,4,8), (3,5,4)]
+        self.assertEqual(mwm(edges), [(1,2), (3,4)])
+        self.assertEqual(mwm(list(reversed(edges))), [(3,4), (1,2)])
+        self.assertEqual(mwm([(y, x, w) for (x, y, w) in edges]), [(2,1), (4,3)])
+        edges = [(0,2,4), (0,3,4), (0,4,1), (1,2,8), (1,5,3), (2,3,9), (3,4,7), (4,5,2)]
+        self.assertEqual(mwm(edges), [(1,2), (3,4)])
+
     def test_fail_bad_input(self):
         """bad input values"""
         with self.assertRaises(TypeError):
