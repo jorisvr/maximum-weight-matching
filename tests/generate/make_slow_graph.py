@@ -20,11 +20,11 @@ count_delta_step = [0]
 def patch_matching_code() -> None:
     """Patch the matching code to count events."""
 
-    import max_weight_matching
+    import mwmatching
 
-    orig_make_blossom = max_weight_matching._MatchingContext.make_blossom
+    orig_make_blossom = mwmatching._MatchingContext.make_blossom
     orig_substage_calc_dual_delta = (
-        max_weight_matching._MatchingContext.substage_calc_dual_delta)
+        mwmatching._MatchingContext.substage_calc_dual_delta)
 
     def stub_make_blossom(*args, **kwargs):
         count_make_blossom[0] += 1
@@ -36,8 +36,8 @@ def patch_matching_code() -> None:
 #        print("DELTA", ret)
         return ret
 
-    max_weight_matching._MatchingContext.make_blossom = stub_make_blossom
-    max_weight_matching._MatchingContext.substage_calc_dual_delta = (
+    mwmatching._MatchingContext.make_blossom = stub_make_blossom
+    mwmatching._MatchingContext.substage_calc_dual_delta = (
         stub_substage_calc_dual_delta)
 
 
@@ -45,12 +45,12 @@ def run_max_weight_matching(
         edges: list[tuple[int, int, int]]
         ) -> tuple[list[tuple[int, int]], int, int]:
     """Run the matching algorithm and count subroutine calls."""
-    import max_weight_matching
+    import mwmatching
 
     count_make_blossom[0] = 0
     count_delta_step[0] = 0
 
-    pairs = max_weight_matching.maximum_weight_matching(edges)
+    pairs = mwmatching.maximum_weight_matching(edges)
     return (pairs, count_make_blossom[0], count_delta_step[0])
 
 

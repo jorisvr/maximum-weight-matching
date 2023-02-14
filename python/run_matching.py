@@ -12,9 +12,8 @@ import math
 import os.path
 from typing import Optional, TextIO
 
-from max_weight_matching import (
-    maximum_weight_matching,
-    adjust_weights_for_maximum_cardinality_matching)
+from mwmatching import (maximum_weight_matching,
+                        adjust_weights_for_maximum_cardinality_matching)
 
 
 def parse_int_or_float(s: str) -> int|float:
