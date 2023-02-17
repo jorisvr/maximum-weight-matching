@@ -70,12 +70,14 @@ def write_dimacs_graph(
 
 
 def make_dense_slow_graph(n: int) -> list[tuple[int, int, int]]:
-    """Generate a dense (not complete) graph with N vertices.
+    """Generate a dense graph with N vertices.
+
+    The graph contains O(n**2) edges and triggers O(n**2) delta steps.
 
     N must be divisible by 4.
 
-    Number of edges = M = (N**2/16 + N/2).
-    Number of delta steps required to solve the matching = (M - 1).
+    Number of edges = M = N**2/16 + N/2
+    Number of delta steps required to solve the matching = M - 1
     """
 
     assert n % 4 == 0
@@ -118,10 +120,12 @@ def make_dense_slow_graph(n: int) -> list[tuple[int, int, int]]:
 def make_sparse_slow_graph(n: int) -> list[tuple[int, int, int]]:
     """Generate a sparse graph with N vertices.
 
+    The graph contains just O(n) edges but still triggers O(n**2) delta steps.
+
     N must be 4 modulo 8.
 
-    Number of edges = M = (5/4 * N - 3).
-    Number of delta steps required to solve the matching ~ (N**2 / 16).
+    Number of edges = M = 5/4 * N - 3
+    Number of delta steps required to solve the matching = N**2/16 + 3/4*N - 3
     """
 
     assert n >= 12
@@ -233,20 +237,40 @@ def make_sparse_slow_graph(n: int) -> list[tuple[int, int, int]]:
     return edges
 
 
+def make_chain_graph(n: int) -> list[tuple[int, int, int]]:
+    """Generate a graph with N vertices connected into a simple chain.
+
+    The graph contains O(n) edges and triggers O(n) delta steps.
+    To force a large number of delta steps, N must be even.
+
+    Number of edges = M = N - 1
+    Number of delta steps required to solve the matching = N - 2
+    """
+
+    assert n >= 2
+
+    edges: list[tuple[int, int, int]] = []
+
+    for i in range(n - 1):
+        w = n + i % 2
+        edges.append((i, i + 1, w))
+
+    return edges
+
+
 def main() -> int:
     """Main program."""
 
     parser = argparse.ArgumentParser()
     parser.description = "Generate a difficult graph."
 
-    parser.add_argument("--structure",
-                        action="store",
-                        choices=("sparse", "dense"),
-                        default="sparse",
-                        help="choose graph structure")
     parser.add_argument("--check",
                         action="store_true",
                         help="solve the matching and count delta steps")
+    parser.add_argument("structure",
+                        action="store",
+                        choices=("sparse", "dense", "chain"),
+                        help="graph structure")
     parser.add_argument("n",
                         action="store",
                         type=int,
@@ -282,6 +306,18 @@ def main() -> int:
             return 1
 
         edges = make_dense_slow_graph(args.n)
+
+    elif args.structure == "chain":
+
+        if args.n < 2:
+            print("ERROR: Number of vertices must be >= 2", file=sys.stderr)
+            return 1
+
+        if args.n % 2 != 0:
+            print("ERROR: Number of vertices must be even", file=sys.stderr)
+            return 1
+
+        edges = make_chain_graph(args.n)
 
     else:
         assert False
