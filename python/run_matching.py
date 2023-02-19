@@ -9,6 +9,7 @@ from __future__ import annotations
 import sys
 import argparse
 import math
+import os
 import os.path
 from typing import Optional, TextIO
 
@@ -30,8 +31,9 @@ def read_dimacs_graph(f: TextIO) -> list[tuple[int, int, int|float]]:
 
     edges: list[tuple[int, int, float]] = []
 
-    for s in f:
-        words = s.strip().split()
+    for line in f:
+        s = line.strip()
+        words = s.split()
 
         if not words[0]:
             # Skip empty line.
@@ -45,7 +47,7 @@ def read_dimacs_graph(f: TextIO) -> list[tuple[int, int, int|float]]:
             # Handle "problem" line.
             if len(words) != 4:
                 raise ValueError(
-                    f"Expecting DIMACS edge format but got {s.strip()!r}")
+                    f"Expecting DIMACS edge format but got {s!r}")
             if words[1] != "edge":
                 raise ValueError(
                     f"Expecting DIMACS edge format but got {words[1]!r}")
@@ -53,11 +55,13 @@ def read_dimacs_graph(f: TextIO) -> list[tuple[int, int, int|float]]:
         elif words[0] == "e":
             # Handle "edge" line.
             if len(words) != 4:
-                raise ValueError(f"Expecting edge but got {s.strip()!r}")
+                raise ValueError(f"Expecting edge but got {s!r}")
             x = int(words[1])
             y = int(words[2])
+            if (x < 1) or (y < 1):
+                raise ValueError(f"Invalid vertex index {s!r}")
             w = parse_int_or_float(words[3])
-            edges.append((x, y, w))
+            edges.append((x - 1, y - 1, w))
 
         else:
             raise ValueError(f"Unknown line type {words[0]!r}")
@@ -89,8 +93,9 @@ def read_dimacs_matching(
     weight: int|float = 0
     pairs: list[tuple[int, int]] = []
 
-    for s in f:
-        words = s.strip().split()
+    for line in f:
+        s = line.strip()
+        words = s.split()
 
         if not words[0]:
             # Skip empty line.
@@ -104,7 +109,7 @@ def read_dimacs_matching(
             # Handle "solution" line.
             if len(words) != 2:
                 raise ValueError(
-                    f"Expecting solution line but got {s.strip()}")
+                    f"Expecting solution line but got {s!r}")
             if have_weight:
                 raise ValueError("Duplicate solution line")
             have_weight = True
@@ -114,10 +119,12 @@ def read_dimacs_matching(
             # Handle "matching" line.
             if len(words) != 3:
                 raise ValueError(
-                    f"Expecting matched edge but got {s.strip()}")
+                    f"Expecting matched edge but got {s!r}")
             x = int(words[1])
             y = int(words[2])
-            pairs.append((x, y))
+            if (x < 1) or (y < 1):
+                raise ValueError(f"Invalid vertex index {s!r}")
+            pairs.append((x - 1, y - 1))
 
         else:
             raise ValueError(f"Unknown line type {words[0]!r}")
@@ -152,7 +159,7 @@ def write_dimacs_matching(
         print("s", f"{weight:.12g}", file=f)
 
     for (x, y) in pairs:
-        print("m", x, y, file=f)
+        print("m", x + 1, y + 1, file=f)
 
 
 def write_dimacs_matching_file(
@@ -324,9 +331,6 @@ def main() -> int:
     parser.description = (
         "Calculate maximum weighted matching of graphs in DIMACS format.")
 
-    parser.add_argument("--stdin",
-                        action="store_true",
-                        help="read graph from stdin")
     parser.add_argument("--verify",
                         action="store_true",
                         help="verify existing output file(s)")
@@ -344,24 +348,19 @@ def main() -> int:
                         help="directory to write output")
     parser.add_argument("input",
                         nargs="*",
-                        help="input file(s)")
+                        help="input file(s); leave empty to read from stdin")
 
     args = parser.parse_args()
 
-    if args.stdin and args.verify:
-        print("ERROR: Can not verify when reading from stdin",
+    if (not args.input) and os.isatty(sys.stdin.fileno()):
+        print("ERROR: Expecting input from stdin but stdin is a terminal",
               file=sys.stderr)
-        return 1
-
-    if (not args.stdin) and (not args.input):
-        parser.print_help(sys.stderr)
         print(file=sys.stderr)
-        print("ERROR: Specify either --stdin or at least one input file",
-              file=sys.stderr)
+        parser.print_help(sys.stderr)
         return 1
 
-    if args.stdin and args.input:
-        print("ERROR: Specify either --stdin or input files, not both",
+    if (not args.input) and args.verify:
+        print("ERROR: Can not verify when reading from stdin",
               file=sys.stderr)
         return 1
 
