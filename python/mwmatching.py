@@ -6,11 +6,12 @@ from __future__ import annotations
 
 import sys
 import math
+from collections.abc import Sequence
 from typing import NamedTuple, Optional
 
 
 def maximum_weight_matching(
-        edges: list[tuple[int, int, int|float]]
+        edges: Sequence[tuple[int, int, int|float]]
         ) -> list[tuple[int, int]]:
     """Compute a maximum-weighted matching in the general undirected weighted
     graph given by "edges".
@@ -91,8 +92,8 @@ def maximum_weight_matching(
 
 
 def adjust_weights_for_maximum_cardinality_matching(
-        edges: list[tuple[int, int, int|float]]
-        ) -> list[tuple[int, int, int|float]]:
+        edges: Sequence[tuple[int, int, int|float]]
+        ) -> Sequence[tuple[int, int, int|float]]:
     """Adjust edge weights such that the maximum-weight matching of
     the adjusted graph is a maximum-cardinality matching, equal to
     a matching in the original graph that has maximum weight out of all
@@ -178,7 +179,7 @@ class MatchingError(Exception):
     pass
 
 
-def _check_input_types(edges: list[tuple[int, int, int|float]]) -> None:
+def _check_input_types(edges: Sequence[tuple[int, int, int|float]]) -> None:
     """Check that the input consists of valid data types and valid
     numerical ranges.
 
@@ -225,7 +226,7 @@ def _check_input_types(edges: list[tuple[int, int, int|float]]) -> None:
                                  f" less than {float_limit:g}")
 
 
-def _check_input_graph(edges: list[tuple[int, int, int|float]]) -> None:
+def _check_input_graph(edges: Sequence[tuple[int, int, int|float]]) -> None:
     """Check that the input is a valid graph, without any multi-edges and
     without any self-edges.
 
@@ -257,8 +258,8 @@ def _check_input_graph(edges: list[tuple[int, int, int|float]]) -> None:
 
 
 def _remove_negative_weight_edges(
-        edges: list[tuple[int, int, int|float]]
-        ) -> list[tuple[int, int, int|float]]:
+        edges: Sequence[tuple[int, int, int|float]]
+        ) -> Sequence[tuple[int, int, int|float]]:
     """Remove edges with negative weight.
 
     This does not change the solution of the maximum-weight matching problem,
@@ -276,7 +277,7 @@ class _GraphInfo:
     These data remain unchanged while the algorithm runs.
     """
 
-    def __init__(self, edges: list[tuple[int, int, int|float]]) -> None:
+    def __init__(self, edges: Sequence[tuple[int, int, int|float]]) -> None:
         """Initialize the graph representation and prepare an adjacency list.
 
         This function takes time O(n + m).
@@ -294,7 +295,7 @@ class _GraphInfo:
         #     "w" is the edge weight.
         #
         # These data remain unchanged while the algorithm runs.
-        self.edges: list[tuple[int, int, int|float]] = edges
+        self.edges: Sequence[tuple[int, int, int|float]] = edges
 
         # num_vertex = the number of vertices.
         if edges:

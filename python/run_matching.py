@@ -11,6 +11,7 @@ import argparse
 import math
 import os
 import os.path
+from collections.abc import Sequence
 from typing import Optional, TextIO
 
 from mwmatching import (maximum_weight_matching,
@@ -266,7 +267,7 @@ def verify_matching(filename: str, maxcard: bool, wfactor: float) -> bool:
     edges = read_dimacs_graph_file(filename)
     (gold_weight, gold_pairs) = read_dimacs_matching_file(matching_filename)
 
-    edges_adj = edges
+    edges_adj: Sequence[tuple[int, int, int|float]] = edges
 
     if wfactor != 1.0:
         if wfactor.is_integer():
