@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import sys
 import argparse
-from typing import TextIO
+from typing import Any, TextIO
 
 
 count_make_blossom = [0]
@@ -26,18 +26,17 @@ def patch_matching_code() -> None:
     orig_substage_calc_dual_delta = (
         mwmatching._MatchingContext.substage_calc_dual_delta)
 
-    def stub_make_blossom(*args, **kwargs):
+    def stub_make_blossom(*args: Any, **kwargs: Any) -> Any:
         count_make_blossom[0] += 1
         return orig_make_blossom(*args, **kwargs)
 
-    def stub_substage_calc_dual_delta(*args, **kwargs):
+    def stub_substage_calc_dual_delta(*args: Any, **kwargs: Any) -> Any:
         count_delta_step[0] += 1
         ret = orig_substage_calc_dual_delta(*args, **kwargs)
-#        print("DELTA", ret)
         return ret
 
-    mwmatching._MatchingContext.make_blossom = stub_make_blossom
-    mwmatching._MatchingContext.substage_calc_dual_delta = (
+    mwmatching._MatchingContext.make_blossom = stub_make_blossom  # type: ignore
+    mwmatching._MatchingContext.substage_calc_dual_delta = (  # type: ignore
         stub_substage_calc_dual_delta)
 
 
