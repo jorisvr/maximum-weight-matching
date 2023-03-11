@@ -41,10 +41,12 @@ Number of vertices: N = 3*K
 Number of edges:    M = 3*K + C*(K-1)
 """
 
+import sys
 import argparse
 
 
 def main():
+    """Main program."""
 
     parser = argparse.ArgumentParser()
     parser.description = (

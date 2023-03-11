@@ -25,10 +25,12 @@ The graph is constructed so that vertices 1 - 4*K form a complete subgraph.
 For 1 <= I <= 2*K, vertex (2*I-1) is joined to vertex (4*K+I).
 """
 
+import sys
 import argparse
 
 
 def main():
+    """Main program."""
 
     parser = argparse.ArgumentParser()
     parser.description = "Generate a difficult graph"
@@ -59,4 +61,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
