@@ -45,6 +45,7 @@ class Matching(NamedTuple):
 
 
 class RunStatus(enum.IntEnum):
+    """Result categories for running a solver."""
     OK = 0
     FAILED = 1
     WRONG_ANSWER = 2
@@ -440,7 +441,7 @@ class WmatchSolver(Solver):
                 y = int(words[1])
             except ValueError:
                 raise SolverError("Invalid format in solver output") from None
-            if x > 0 and x < y:
+            if 0 < x < y:
                 pairs.append((x - 1, y - 1))
 
         return Matching(pairs)
@@ -660,7 +661,7 @@ def test_input(
     for filename in files:
 
         try:
-            with open(filename, "r") as f:
+            with open(filename, "r", encoding="ascii") as f:
                 graph = read_dimacs_graph(f)
         except (OSError, ValueError) as exc:
             print(f"ERROR: Can not read graph {filename!r} ({exc})",
@@ -671,7 +672,7 @@ def test_input(
         if verify:
             reffile = os.path.splitext(filename)[0] + ".out"
             try:
-                with open(reffile, "r") as f:
+                with open(reffile, "r", encoding="ascii") as f:
                     (gold_weight, _matching) = read_dimacs_matching(f)
             except (OSError, ValueError) as exc:
                 print(f"ERROR: Can not read matching {reffile!r} ({exc})",

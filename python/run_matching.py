@@ -73,7 +73,7 @@ def read_dimacs_graph(f: TextIO) -> list[tuple[int, int, int|float]]:
 def read_dimacs_graph_file(filename: str) -> list[tuple[int, int, int|float]]:
     """Read a graph from file or stdin."""
     if filename:
-        with open(filename, "r") as f:
+        with open(filename, "r", encoding="ascii") as f:
             try:
                 return read_dimacs_graph(f)
             except ValueError as exc:
@@ -140,7 +140,7 @@ def read_dimacs_matching_file(
         filename: str
         ) -> tuple[int|float, list[tuple[int, int]]]:
     """Read a matching from file."""
-    with open(filename, "r") as f:
+    with open(filename, "r", encoding="ascii") as f:
         try:
             return read_dimacs_matching(f)
         except ValueError as exc:
@@ -170,7 +170,7 @@ def write_dimacs_matching_file(
         ) -> None:
     """Write a matching to file or stdout."""
     if filename:
-        with open(filename, "x") as f:
+        with open(filename, "x", encoding="ascii") as f:
             write_dimacs_matching(f, weight, pairs)
     else:
         write_dimacs_matching(sys.stdout, weight, pairs)

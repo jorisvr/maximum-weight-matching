@@ -19,6 +19,7 @@ count_delta_step = [0]
 
 def patch_matching_code() -> None:
     """Patch the matching code to count events."""
+    # pylint: disable=import-outside-toplevel,protected-access
 
     import mwmatching
 
@@ -44,6 +45,8 @@ def run_max_weight_matching(
         edges: list[tuple[int, int, int]]
         ) -> tuple[list[tuple[int, int]], int, int]:
     """Run the matching algorithm and count subroutine calls."""
+    # pylint: disable=import-outside-toplevel
+
     import mwmatching
 
     count_make_blossom[0] = 0
@@ -322,7 +325,7 @@ def main() -> int:
         assert False
 
     if args.check:
-        (pairs, num_blossom, num_delta) = run_max_weight_matching(edges)
+        (_pairs, num_blossom, num_delta) = run_max_weight_matching(edges)
         print(f"n={args.n} m={len(edges)} "
               f"nblossom={num_blossom} ndelta={num_delta}",
               file=sys.stderr)
