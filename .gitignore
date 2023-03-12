@@ -1,0 +1,4 @@
+__pycache__/
+.coverage
+
+tests/lemon/lemon_matching
