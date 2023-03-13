@@ -24,7 +24,7 @@ class InvalidMatchingError(Exception):
 
 
 class SolverError(Exception):
-    """Raised if the solver returns an error outputs an invalid format."""
+    """Raised if the solver returns an error or outputs an invalid format."""
 
 
 class Graph(NamedTuple):
